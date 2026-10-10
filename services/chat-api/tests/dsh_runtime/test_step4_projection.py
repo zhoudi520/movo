@@ -299,6 +299,36 @@ def test_internal_capability_results_project_knowledge_evidence_and_artifacts() 
     assert artifact["payload"]["artifacts"][0]["object_path"] == "tenant/report.docx"
 
 
+def test_v4_native_tool_message_projects_artifact_export_deliverables() -> None:
+    import json
+
+    projector = KernelEventProjector()
+    projector.project(
+        _event("tool.call.started", {"callId": "export-1", "name": "artifact_export", "arguments": "{}"}, cursor=40),
+        message_id="message-a",
+    )
+    artifact = projector.project(
+        _event("tool.call.completed", {"message": {
+            "role": "tool",
+            "toolCallId": "export-1",
+            "content": [{"type": "text", "text": json.dumps({
+                "success": True,
+                "artifact": {
+                    "type": "docx",
+                    "object_path": "tenant/user/你好2026.docx",
+                    "filename": "你好2026.docx",
+                    "lifecycle": "final",
+                    "visibility": "user",
+                },
+            }, ensure_ascii=False)}],
+        }}, cursor=41),
+        message_id="message-a",
+    )
+    assert artifact is not None
+    assert artifact["payload"]["artifacts"][0]["filename"] == "你好2026.docx"
+    assert artifact["payload"]["artifacts"][0]["object_path"] == "tenant/user/你好2026.docx"
+
+
 def test_explicit_profile_publish_does_not_replace_tenant_default() -> None:
     async def scenario() -> None:
         store = InMemoryRuntimeProfileStore()

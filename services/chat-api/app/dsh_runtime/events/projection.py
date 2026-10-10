@@ -240,6 +240,9 @@ class KernelEventProjector:
         message = payload.get("message")
         if not isinstance(message, dict):
             return str(payload.get("callId") or "")
+        direct = str(message.get("toolCallId") or message.get("tool_call_id") or "")
+        if direct:
+            return direct
         source = message.get("source")
         if isinstance(source, dict) and source.get("callId"):
             return str(source["callId"])
@@ -248,8 +251,35 @@ class KernelEventProjector:
                 return str(block["toolCallId"])
         return str(payload.get("callId") or "")
 
-    @staticmethod
-    def _tool_result(payload: dict[str, Any]) -> tuple[bool, str, str, Any]:
+    @classmethod
+    def _tool_message_texts(cls, message: dict[str, Any]) -> tuple[list[str], bool]:
+        """Collect tool output text from legacy tool-result wrappers or DSH v4 tool messages."""
+        texts: list[str] = []
+        is_error = bool(message.get("error") or message.get("isError"))
+        role = str(message.get("role") or "")
+        content = message.get("content")
+        blocks = content if isinstance(content, list) else []
+
+        if role == "tool":
+            if isinstance(content, str) and content.strip():
+                texts.append(content)
+            else:
+                for block in blocks:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        texts.append(str(block.get("text") or ""))
+            return texts, is_error
+
+        for block in blocks:
+            if not isinstance(block, dict) or block.get("type") != "tool-result":
+                continue
+            is_error = is_error or bool(block.get("isError"))
+            for part in list(block.get("content") or []):
+                if isinstance(part, dict) and part.get("type") == "text":
+                    texts.append(str(part.get("text") or ""))
+        return texts, is_error
+
+    @classmethod
+    def _tool_result(cls, payload: dict[str, Any]) -> tuple[bool, str, str, Any]:
         if payload.get("codeDispatch"):
             texts = [
                 str(part.get("text") or "")
@@ -268,15 +298,7 @@ class KernelEventProjector:
         message = payload.get("message")
         if not isinstance(message, dict):
             return True, "", "", None
-        texts: list[str] = []
-        is_error = bool(message.get("error"))
-        for block in list(message.get("content") or []):
-            if not isinstance(block, dict) or block.get("type") != "tool-result":
-                continue
-            is_error = is_error or bool(block.get("isError"))
-            for part in list(block.get("content") or []):
-                if isinstance(part, dict) and part.get("type") == "text":
-                    texts.append(str(part.get("text") or ""))
+        texts, is_error = cls._tool_message_texts(message)
         summary = "\n".join(value for value in texts if value).strip()[:1000]
         decoded: Any = None
         if len(texts) == 1:
@@ -342,7 +364,7 @@ class KernelEventProjector:
             visibility = str(item.get("visibility") or "").strip().lower()
             if lifecycle == "intermediate" or visibility == "internal":
                 continue
-            object_path = str(item.get("object_path") or "")
+            object_path = str(item.get("object_path") or item.get("_oss_object_path") or "")
             marker = object_path or str(item.get("url") or item.get("filename") or "")
             if not marker or marker in seen:
                 continue
