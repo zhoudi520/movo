@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import get_settings
 from app.core.db import get_db
@@ -70,19 +73,26 @@ class DshRuntimeApplication:
             bundle_gateway_url=settings.DSH_TOOL_GATEWAY_URL.removesuffix("/tools") + "/skill-bundles",
             plugin_gateway_url=settings.DSH_TOOL_GATEWAY_URL.removesuffix("/tools") + "/plugin-archives",
         )
+        runtime_token = str(settings.DSH_RUNTIME_HOST_TOKEN or "")
         self._transport = HttpKernelHostTransport(
             settings.DSH_RUNTIME_HOST_URL,
             timeout_seconds=settings.DSH_RUNTIME_HTTP_TIMEOUT_SECONDS,
             # A full tenant Profile can take longer than the transport's
             # default minute to boot when many Skills and plugins are present.
             startup_timeout_seconds=300,
-            access_token=settings.DSH_RUNTIME_HOST_TOKEN,
+            access_token=runtime_token,
         )
         try:
             health = await self._transport.request("GET", "/health")
             self.host_healthy = health.get("ok") is True and health.get("kernel") == "dsh"
         except DshRuntimeError:
             self.host_healthy = False
+        if not self.host_healthy:
+            logger.warning(
+                f"DSH Runtime Host is not healthy at {settings.DSH_RUNTIME_HOST_URL} "
+                f"(bearer token length={len(runtime_token)}). "
+                f"Run scripts/dev/sync_runtime_secrets.ps1 and restart chat-api."
+            )
         gateway = DshAgentKernelGateway(
             self._transport,
             kernel_version=self.KERNEL_VERSION,
@@ -181,8 +191,9 @@ class DshRuntimeApplication:
         try:
             health = await self._transport.request("GET", "/health")
             self.host_healthy = health.get("ok") is True and health.get("kernel") == "dsh"
-        except DshRuntimeError:
+        except DshRuntimeError as exc:
             self.host_healthy = False
+            logger.warning(f"DSH probe failed: {exc}")
         return self.host_healthy
 
     def require_chat(self) -> DshChatService:

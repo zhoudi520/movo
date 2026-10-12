@@ -1,0 +1,25 @@
+# Hybrid local development: install dependencies ONLY from this file.
+#
+#   python -m venv services/.venv
+#   services/.venv/Scripts/pip install -r services/requirements.txt   # Windows
+#   services/.venv/bin/pip install -r services/requirements.txt     # Linux/macOS
+#   python -m services                                              # start backends
+#
+# Do not pip install services/document-parser/requirements.txt into the same venv;
+# that file targets the document-parser Docker image / dev.sh isolated .venv and
+# uses older shared pins (pymongo 3.x, uvicorn <0.30) that conflict with chat-api.
+#
+# Layout:
+#   - chat-api/requirements.txt — canonical pins for chat-api + shared libraries
+#     (fastapi, uvicorn 0.30+, pymongo 4.x, python-docx, pypdf, openpyxl,
+#     python-multipart, certifi, msgpack, oss2, …)
+#   - Below — document-parser worker only (Celery + Redis broker)
+#   - admin-api — no extra packages beyond chat-api subset at runtime
+#
+# Optional Docling stack (heavy; matches document-parser Docker image):
+#   pip install -r services/document-parser/requirements-docling.txt
+
+-r chat-api/requirements.txt
+
+# document-parser API + Celery worker (hybrid host via python -m services)
+celery[redis]>=5.4.0,<6.0.0

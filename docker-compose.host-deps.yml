@@ -1,0 +1,80 @@
+# Optional overlay for hybrid local development:
+# Python backends on the host (python -m services) + infra in Docker.
+#
+# Default docker-compose.yml keeps services on an internal-only backend network
+# without host ports. This overlay publishes loopback ports and attaches public
+# network so Docker Desktop can forward them to the host.
+#
+# Infra + DSH only (host chat-api via run_backends):
+#   docker compose -f docker-compose.yml -f docker-compose.host-deps.yml up -d bootstrap mongo redis weaviate dsh-runtime-host
+#
+# Full stack in Docker with loopback ports (e.g. host Vite + container APIs):
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml -f docker-compose.host-deps.yml up -d
+#
+# bootstrap / document-worker have no HTTP ports to publish.
+#
+# Sync secrets for host chat-api (PowerShell / Git Bash):
+#   scripts/dev/sync_runtime_secrets.ps1
+#   scripts/dev/sync_runtime_secrets.sh
+#
+# Host chat-api must reach DSH at http://127.0.0.1:8101 with the same
+# DSH_RUNTIME_HOST_TOKEN as in .movo-dev/runtime.env (run_backends loads it).
+
+services:
+  mongo:
+    ports:
+      - "127.0.0.1:27017:27017"
+    networks:
+      - backend
+      - public
+
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
+    networks:
+      - backend
+      - public
+
+  weaviate:
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      - backend
+      - public
+
+  dsh-runtime-host:
+    ports:
+      - "127.0.0.1:8101:8101"
+    networks:
+      - backend
+      - public
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # chat-api runs on the host; container DSH must call back via host gateway.
+      DSH_MODEL_GATEWAY_URL: http://host.docker.internal:${MOVO_HOST_BACKEND_PORT:-8000}/internal/dsh/model/generate
+      DSH_TOOL_GATEWAY_URL: http://host.docker.internal:${MOVO_HOST_BACKEND_PORT:-8000}/internal/dsh/tools
+
+  chat-api:
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  admin-api:
+    ports:
+      - "127.0.0.1:8100:8100"
+
+  document-api:
+    ports:
+      - "127.0.0.1:8200:8200"
+
+  user-web:
+    ports:
+      - "127.0.0.1:${MOVO_USER_WEB_PORT:-3010}:80"
+
+  admin-web:
+    ports:
+      - "127.0.0.1:${MOVO_ADMIN_WEB_PORT:-3011}:80"
+
+  gateway:
+    ports: !override
+      - "127.0.0.1:${MOVO_PORT:-${ASKAI_PORT:-3000}}:80"

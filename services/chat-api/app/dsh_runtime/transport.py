@@ -40,12 +40,20 @@ class HttpKernelHostTransport:
         access_token: str = "",
     ) -> None:
         self._startup_timeout_seconds = startup_timeout_seconds
-        headers = {"Authorization": f"Bearer {access_token}"} if access_token else None
+        self._default_access_token = access_token
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=httpx.Timeout(timeout_seconds),
-            headers=headers,
         )
+
+    def _authorization_headers(self) -> dict[str, str]:
+        """Resolve bearer token on each call so Settings / runtime.env updates apply without restart."""
+        from app.core.config import get_settings
+
+        token = str(get_settings().DSH_RUNTIME_HOST_TOKEN or self._default_access_token or "")
+        if not token:
+            return {}
+        return {"Authorization": f"Bearer {token}"}
 
     async def request(
         self,
@@ -61,7 +69,14 @@ class HttpKernelHostTransport:
                 if method.upper() == "POST" and path == "/v1/runtimes"
                 else self._client.timeout
             )
-            response = await self._client.request(method, path, json=json, params=params, timeout=timeout)
+            response = await self._client.request(
+                method,
+                path,
+                json=json,
+                params=params,
+                timeout=timeout,
+                headers=self._authorization_headers(),
+            )
         except httpx.HTTPError as exc:
             raise DshTransportError(f"DSH Runtime Host is unavailable: {exc}") from exc
         try:
@@ -93,7 +108,12 @@ class HttpKernelHostTransport:
         params: Mapping[str, Any] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         try:
-            async with self._client.stream(method, path, params=params) as response:
+            async with self._client.stream(
+                method,
+                path,
+                params=params,
+                headers=self._authorization_headers(),
+            ) as response:
                 if response.is_error:
                     body = await response.aread()
                     try:

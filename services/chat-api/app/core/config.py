@@ -1,6 +1,79 @@
-from pydantic import field_validator
-from pydantic_settings import BaseSettings
+import os
+import re
+import sys
 from functools import lru_cache
+from pathlib import Path
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+def _detect_repo_root(config_file: Path) -> Path:
+    """
+    Resolve monorepo root on the host or ``/app`` inside the chat-api container.
+
+    Host layout: ``movo/services/chat-api/app/core/config.py`` → ``movo``.
+    Container layout: ``/app/app/core/config.py`` → ``/app``.
+    """
+    parents = config_file.parents
+    if len(parents) >= 5 and parents[3].name == "services":
+        root = parents[4]
+        if (root / "services" / "chat-api").is_dir():
+            return root
+    if len(parents) >= 3:
+        return parents[2]
+    return config_file.parent
+
+
+_REPO_ROOT = _detect_repo_root(Path(__file__).resolve())
+_ENV_FILES: list[str] = [".env"]
+_SHARED_RUNTIME_ENV = _REPO_ROOT / ".movo-dev" / "runtime.env"
+if _SHARED_RUNTIME_ENV.is_file():
+    _ENV_FILES.append(str(_SHARED_RUNTIME_ENV))
+
+_LOCAL_RUNTIME_SECRET_KEYS = (
+    "DSH_RUNTIME_HOST_TOKEN",
+    "DSH_MODEL_GATEWAY_SIGNING_SECRET",
+    "END_USER_AUTH_SECRET",
+    "ADMIN_BACKEND_SERVICE_TOKEN",
+)
+
+
+def _dsh_callback_host() -> str | None:
+    """
+    Return the host DSH (usually in Docker) should use to reach chat-api on the dev machine.
+
+    When unset on Windows, defaults to ``host.docker.internal``. Set
+    ``MOVO_DSH_CALLBACK_HOST=127.0.0.1`` when DSH runs on the same host as chat-api.
+    """
+    explicit = os.environ.get("MOVO_DSH_CALLBACK_HOST", "").strip()
+    if explicit.lower() in {"off", "disabled", "127.0.0.1", "localhost"}:
+        return None
+    if explicit:
+        return explicit
+    if sys.platform == "win32":
+        return "host.docker.internal"
+    return None
+
+
+def _gateway_port_from_url(url: str, fallback: str = "8000") -> str:
+    """Extract the TCP port from an internal DSH gateway URL."""
+    match = re.search(r":(\d+)(?:/|$)", url)
+    return match.group(1) if match else fallback
+
+
+def _read_dotenv_key(env_file: Path, key: str) -> str:
+    """Read one key from a dotenv file without executing it."""
+    if not env_file.is_file():
+        return ""
+    prefix = f"{key}="
+    for raw_line in env_file.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or not line.startswith(prefix):
+            continue
+        value = line[len(prefix) :].strip().strip('"').strip("'").rstrip("\r")
+        return value
+    return ""
+
 
 class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
@@ -185,11 +258,61 @@ class Settings(BaseSettings):
         intents = ["chat", "task"]
         return [intent for intent in intents if self.is_planning_intent_enabled(intent)]
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-        extra = "ignore"
+    model_config = SettingsConfigDict(
+        env_file=tuple(_ENV_FILES),
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore",
+        env_ignore_empty=True,
+    )
+
+
+def _apply_local_runtime_env_overrides(settings: Settings) -> Settings:
+    """
+    Prefer ``.movo-dev/runtime.env`` for Docker-synced secrets in hybrid dev.
+
+    Process environment (IDE, shell, empty placeholders) otherwise overrides env
+    files and leaves DSH with a short or wrong bearer token.
+    """
+    if not _SHARED_RUNTIME_ENV.is_file():
+        return settings
+    updates: dict[str, str] = {}
+    for key in _LOCAL_RUNTIME_SECRET_KEYS:
+        file_value = _read_dotenv_key(_SHARED_RUNTIME_ENV, key)
+        if len(file_value) < 32:
+            continue
+        current = str(getattr(settings, key, "") or "")
+        if current != file_value:
+            updates[key] = file_value
+    if not updates:
+        return settings
+    return settings.model_copy(update=updates)
+
+
+def _apply_hybrid_dsh_gateway_urls(settings: Settings) -> Settings:
+    """
+    Rewrite model/tool gateway URLs for hybrid dev (host chat-api + container DSH).
+
+    Profiles embed these URLs; ``127.0.0.1`` inside DSH points at the container, not the host.
+    """
+    callback_host = _dsh_callback_host()
+    if not callback_host:
+        return settings
+    port = os.environ.get("BACKEND_PORT", "").strip() or _gateway_port_from_url(
+        settings.DSH_MODEL_GATEWAY_URL,
+        "8000",
+    )
+    base = f"http://{callback_host}:{port}"
+    return settings.model_copy(
+        update={
+            "DSH_MODEL_GATEWAY_URL": f"{base}/internal/dsh/model/generate",
+            "DSH_TOOL_GATEWAY_URL": f"{base}/internal/dsh/tools",
+        }
+    )
+
 
 @lru_cache()
-def get_settings():
-    return Settings()
+def get_settings() -> Settings:
+    """Return cached settings (includes ``.movo-dev/runtime.env`` when present)."""
+    settings = _apply_local_runtime_env_overrides(Settings())
+    return _apply_hybrid_dsh_gateway_urls(settings)

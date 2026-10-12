@@ -4,8 +4,11 @@ import asyncio
 import json
 import os
 import re
-import resource
 import shutil
+try:
+    import resource
+except ImportError:  # Windows has no resource module
+    resource = None  # type: ignore[assignment,misc]
 import subprocess
 import sys
 import tempfile
@@ -540,6 +543,8 @@ class ScriptPluginExecutor(BaseExecutor):
 
     @staticmethod
     def _limit_child_process() -> None:
+        if resource is None:
+            return
         limits = [
             (resource.RLIMIT_CPU, (60, 65)),
             (resource.RLIMIT_AS, (1024 * 1024 * 1024, 1024 * 1024 * 1024)),
