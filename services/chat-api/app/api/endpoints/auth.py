@@ -22,6 +22,12 @@ from app.core.tenant import DEFAULT_MAIN_ID, add_main_scope, resolve_main_id
 from app.utils.oss_uploader import ObjectStorageClient
 from app.utils.uploads import read_upload_with_limit
 from app.governance.position_policy import MongoEmployeePolicyResolver
+from app.services.embed_login import (
+    EmbedLoginAmbiguousError,
+    EmbedLoginIdentityError,
+    resolve_embed_end_user,
+    resolve_embed_main_id,
+)
 from app.services.end_user_tenant_access import load_tenant_candidates, resolve_space_type
 from app.services.end_user_session import resolve_session_user as _resolve_session_user
 
@@ -71,6 +77,11 @@ class SelectTenantRequest(BaseModel):
 
 class SwitchTenantRequest(BaseModel):
     mainId: str = Field(min_length=1, max_length=64)
+
+
+class EmbedLoginRequest(BaseModel):
+    userId: str = Field(min_length=1, max_length=64)
+    mainId: str = Field(default="", max_length=64)
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -281,6 +292,48 @@ async def _create_login_challenge(username: str, candidates: list[dict[str, Any]
         }
     )
     return {"challengeToken": challenge_token, "candidates": candidates, "expiresAt": expires_at.isoformat()}
+
+
+@router.post("/auth/embed-login", response_model=ApiResponse)
+async def embed_login(payload: EmbedLoginRequest) -> ApiResponse:
+    """Issue an end-user session for iframe embed flows (login_name, no password).
+
+    Requires MOVO_EMBED_LOGIN_ENABLED. mainId defaults to Setup singleton main_id.
+    When MOVO_EMBED_AUTO_PROVISION is true, missing users are created on first visit
+    (no admin password setup). login_name matching is case-insensitive.
+    """
+
+    settings = get_settings()
+    if not settings.MOVO_EMBED_LOGIN_ENABLED:
+        return ApiResponse(code=1, message="Embed 登录未启用")
+
+    db = get_db()
+    setup_state = await db["system_bootstrap"].find_one({"_id": "singleton"}, {"completed": 1})
+    if not setup_state or not bool(setup_state.get("completed")):
+        return ApiResponse(code=1, message="系统尚未完成初始化，请先在管理后台执行 Setup")
+
+    main_id = await resolve_embed_main_id(db, payload.mainId)
+    if not _is_valid_tenant_main_id(main_id):
+        return ApiResponse(code=1, message="组织ID无效，请联系管理员配置租户ID")
+
+    try:
+        user_doc = await resolve_embed_end_user(
+            db,
+            main_id,
+            payload.userId,
+            auto_provision=bool(settings.MOVO_EMBED_AUTO_PROVISION),
+        )
+    except EmbedLoginAmbiguousError:
+        return ApiResponse(code=1, message="账号登录名存在大小写冲突，请联系管理员")
+    except EmbedLoginIdentityError as exc:
+        return ApiResponse(code=1, message=str(exc))
+    if not user_doc:
+        return ApiResponse(code=1, message="用户不存在或已禁用")
+
+    candidates = await load_tenant_candidates(db, [user_doc])
+    candidates = [item for item in candidates if _is_valid_tenant_main_id(resolve_main_id(item.get("mainId")))]
+    session_payload = await _create_session(user_doc, candidates)
+    return ApiResponse(code=0, data=session_payload)
 
 
 @router.post("/auth/login", response_model=ApiResponse)

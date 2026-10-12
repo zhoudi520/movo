@@ -20,6 +20,7 @@ class RuntimeProfileSnapshot(BaseModel):
     content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     tenant_id: str = Field(min_length=1, max_length=256)
     subject_user_id: str = Field(default="", max_length=256)
+    subject_login_name: str = Field(default="", max_length=64)
     model_source_tenant_id: str = Field(min_length=1, max_length=256)
     model_instance_id: str = Field(min_length=1, max_length=256)
     provider_id: str = Field(min_length=1, max_length=256)
@@ -86,6 +87,8 @@ class RuntimeProfileSnapshot(BaseModel):
             "gatewayUrl": gateway_url,
             "accessToken": access_token,
         }
+        if self.subject_login_name:
+            payload["subjectLoginName"] = self.subject_login_name
         if self.tools:
             native_replacements = [
                 tool.name for tool in self.tools if tool.name == "external_search"

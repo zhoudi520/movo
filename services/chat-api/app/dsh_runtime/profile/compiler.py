@@ -6,6 +6,11 @@ import hashlib
 import json
 from typing import Any
 
+from bson import ObjectId
+
+from app.core.db import get_db
+from app.core.tenant import add_main_scope
+
 from .catalog import ModelCatalog
 from .models import RuntimeProfileSnapshot
 from .tools import ToolProfileCompiler
@@ -54,10 +59,12 @@ class ModelProfileCompiler:
             tenant_id=tenant_id, user_id=user_id, tools=tools,
         ) if self._skill_compiler else None
         plugins = await self._plugin_catalog.list_enabled(tenant_id, user_id) if self._plugin_catalog else ()
+        subject_login_name = await self._resolve_subject_login_name(tenant_id, user_id)
         payload: dict[str, Any] = {
             "schema_version": "askai.runtime-profile.v1",
             "tenant_id": tenant_id,
             "subject_user_id": user_id,
+            "subject_login_name": subject_login_name,
             "model_source_tenant_id": str(instance.get("main_id")),
             "model_instance_id": str(instance.get("_id")),
             "provider_id": str(provider.get("_id")),
@@ -86,6 +93,22 @@ class ModelProfileCompiler:
             content_hash=content_hash,
             profile_version=f"rp-{content_hash[:24]}",
         )
+
+    @staticmethod
+    async def _resolve_subject_login_name(tenant_id: str, user_id: str) -> str:
+        """Load canonical end-user login_name for DSH runtime identity."""
+
+        uid = str(user_id or "").strip()
+        if not uid or not ObjectId.is_valid(uid):
+            return ""
+        db = get_db()
+        row = await db.end_users.find_one(
+            add_main_scope({"_id": ObjectId(uid), "status": "active"}, tenant_id),
+            {"login_name": 1},
+        )
+        if not row:
+            return ""
+        return str(row.get("login_name") or "").strip()
 
     @staticmethod
     def content_hash(payload: dict[str, Any]) -> str:

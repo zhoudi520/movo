@@ -12,6 +12,7 @@ const ALLOWED_FIELDS = new Set([
   'bundleGatewayUrl',
   'pluginGatewayUrl',
   'plugins',
+  'subjectLoginName',
 ])
 
 function nonEmptyString(value) {

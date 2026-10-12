@@ -13,7 +13,7 @@ import ChatSessionHeader from './components/chat/ChatSessionHeader.vue'
 import DesktopServerSetup from './components/desktop/DesktopServerSetup.vue'
 import type { DesktopToolLauncherKind } from './components/desktop/desktopToolTabs'
 import CreateProjectDialog from './components/code/CreateProjectDialog.vue'
-import { fetchOrgBilling, fetchUserProfile, getAdminSSOToken, logoutWithToken, switchTenant, type TenantCandidate, type UserProfile } from './api/auth'
+import { fetchOrgBilling, fetchUserProfile, getAdminSSOToken, loginWithEmbedUserId, logoutWithToken, switchTenant, type TenantCandidate, type UserProfile } from './api/auth'
 import { AUTH_EXPIRED_EVENT } from './api/authExpiry'
 import { activateEmbeddedBrowserSession, capabilities, getDshWorkspaceSummary, getSettings, updateSettings, startAgent, stopAgent, getAgentStatus, openResource, selectEmbeddedBrowserSession, selectDshWorkspace, renameDshWorkspace } from './platform'
 import type { DshTaskChangeSet, DshWorkspace, DshWorkspaceSummary } from './platform/types'
@@ -732,6 +732,38 @@ async function syncDesktopAgentIdentity(token: string, userId: string | number |
   }
 }
 
+function embedUserIdFromLocation(): string {
+  if (typeof window === 'undefined') return ''
+  const url = new URL(window.location.href)
+  return String(url.searchParams.get('userID') || url.searchParams.get('userId') || '').trim()
+}
+
+async function tryEmbedLoginFromUrl(): Promise<boolean> {
+  const userId = embedUserIdFromLocation()
+  if (!userId) return false
+  const url = new URL(window.location.href)
+  const mainId = String(url.searchParams.get('mainId') || '').trim()
+  // Third-party embed URLs must win over a stale cached session.
+  if (authToken.value || localStorage.getItem(authTokenKey)) {
+    localStorage.removeItem(authTokenKey)
+    localStorage.removeItem(authUserProfileKey)
+    authToken.value = ''
+    userProfile.value = null
+    currentAccount.value = ''
+  }
+  const result = await loginWithEmbedUserId(userId, mainId)
+  if (!result.ok || !result.token) {
+    shareToast.warning(result.message || t('api.auth.login_failed'))
+    return false
+  }
+  handleLoginSuccess({
+    token: result.token,
+    username: result.profile?.username || userId,
+    profile: result.profile,
+  })
+  return true
+}
+
 function handleLoginSuccess(payload: { token: string; username: string; profile?: UserProfile }) {
   // Authentication is complete once a token is returned. Close the dialog
   // before running optional cleanup and persistence so those follow-up tasks
@@ -749,13 +781,23 @@ function handleLoginSuccess(payload: { token: string; username: string; profile?
   clearUserBoundProjectState(true)
   if (typeof window !== 'undefined') {
     const url = new URL(window.location.href)
-    if (url.searchParams.has('invite_code') || url.searchParams.has('inviteCode') || url.searchParams.has('register')) {
+    if (
+      url.searchParams.has('invite_code')
+      || url.searchParams.has('inviteCode')
+      || url.searchParams.has('register')
+      || url.searchParams.has('userID')
+      || url.searchParams.has('userId')
+      || url.searchParams.has('mainId')
+    ) {
       url.searchParams.delete('invite_code')
       url.searchParams.delete('inviteCode')
       url.searchParams.delete('register')
       url.searchParams.delete('invite')
       url.searchParams.delete('username')
       url.searchParams.delete('loginName')
+      url.searchParams.delete('userID')
+      url.searchParams.delete('userId')
+      url.searchParams.delete('mainId')
       window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
     }
   }
@@ -2201,7 +2243,13 @@ onMounted(async () => {
     : localStorage.getItem(authTokenKey) || ''
   loadSavedUsers()
   loadUserProfile()
-  if (authToken.value && !userProfile.value) {
+  if (embedUserIdFromLocation()) {
+    const embedded = await tryEmbedLoginFromUrl()
+    if (!embedded) {
+      loginOpen.value = true
+    }
+    startLocalSession({ shouldNavigate: currentView.value === 'chat' })
+  } else if (authToken.value && !userProfile.value) {
     startLocalSession({ shouldNavigate: currentView.value === 'chat' })
     sessionsLoading.value = true
     refreshUserProfile(authToken.value).catch(() => {
@@ -2212,7 +2260,7 @@ onMounted(async () => {
     refreshUserProfile(authToken.value, false, true).catch(() => {
       loadSessions(true).catch(() => {})
     })
-  } else if (!authToken.value) {
+  } else {
     loginOpen.value = true
     startLocalSession({ shouldNavigate: currentView.value === 'chat' })
   }

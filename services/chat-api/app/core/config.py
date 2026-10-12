@@ -158,6 +158,10 @@ class Settings(BaseSettings):
     MONGODB_DB: str = "gragentic"
     END_USER_AUTH_TOKEN_TTL_SECONDS: int = 60 * 60 * 24 * 7
     END_USER_AUTH_SECRET: str = ""
+    # Trusted third-party iframe login via login_name (see POST /auth/embed-login).
+    MOVO_EMBED_LOGIN_ENABLED: bool = False
+    # When embed login is enabled, auto-create missing end_users (no admin password setup).
+    MOVO_EMBED_AUTO_PROVISION: bool = True
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
     LOG_FILE_ENABLED: bool = False

@@ -11,6 +11,11 @@ const valid = {
   accessToken: 'ephemeral-token',
 }
 
+test('model profile accepts optional subjectLoginName', () => {
+  const normalized = normalizeModelProfile({ ...valid, subjectLoginName: 'Alice' }, 'profile-a')
+  assert.equal(normalized.subjectLoginName, 'Alice')
+})
+
 test('model profile accepts only the secret-free ephemeral Host schema', () => {
   assert.equal(normalizeModelProfile(valid, 'profile-a').modelInstanceId, 'model-a')
   assert.throws(

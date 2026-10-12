@@ -76,6 +76,28 @@ export type AgentPolicySnapshot = {
 }
 
 
+export async function loginWithEmbedUserId(
+  userId: string,
+  mainId = '',
+): Promise<AuthResult> {
+  try {
+    const response = await client.post('/auth/embed-login', {
+      userId,
+      mainId: mainId || undefined,
+    })
+    const payload = response.data
+    if (!isOk(payload)) {
+      return { ok: false, message: payload?.message || t('api.auth.login_failed') }
+    }
+    const token = payload?.data?.token
+    const profile = payload?.data?.profile
+    if (!token) return { ok: false, message: t('api.auth.missing_token') }
+    return { ok: true, token, profile }
+  } catch (error: any) {
+    return { ok: false, message: error?.response?.data?.message || error?.message || t('api.auth.login_failed') }
+  }
+}
+
 export async function loginWithPassword(
   username: string,
   password: string,
