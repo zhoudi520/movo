@@ -116,6 +116,7 @@ from app.api.endpoints import (
     dsh_tool_gateway,
     external_tools,
     knowledge_sources,
+    knowledge_source_config,
     models,
     projects,
     product,
@@ -146,6 +147,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(debug.router, prefix="/api")
 app.include_router(documents.router, prefix="/api")
 app.include_router(knowledge_sources.router, prefix="/api")
+app.include_router(knowledge_source_config.router, prefix="/api")
 app.include_router(external_tools.router, prefix="/api")
 app.include_router(models.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")

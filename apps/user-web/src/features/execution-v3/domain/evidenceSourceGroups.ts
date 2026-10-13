@@ -47,11 +47,13 @@ export function evidenceSourceStats(sources: EvidenceSourceItem[]) {
   const groups = groupEvidenceSources(sources)
   let web = 0
   let internal = 0
+  let external = 0
   let fragments = 0
 
   for (const group of groups) {
     const type = String(group.primary.source_type || '')
     if (type === 'web') web += 1
+    else if (type === 'external_knowledge') external += 1
     else internal += 1
     if (group.isDocument) fragments += group.sources.length
   }
@@ -61,6 +63,7 @@ export function evidenceSourceStats(sources: EvidenceSourceItem[]) {
     total: groups.length,
     web,
     internal,
+    external,
     fragments,
   }
 }

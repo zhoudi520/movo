@@ -29,6 +29,7 @@ const displaySummary = computed(() => {
   const parts: string[] = []
   if (sourceStats.value.web) parts.push(`${t('evidence.web')} ${sourceStats.value.web}`)
   if (sourceStats.value.internal) parts.push(`${t('evidence.internal')} ${sourceStats.value.internal}`)
+  if (sourceStats.value.external) parts.push(`${t('evidence.external_knowledge')} ${sourceStats.value.external}`)
   return `${t('evidence.summary_prefix')} ${total} ${t('evidence.summary_suffix')}${parts.length ? ` · ${parts.join(' · ')}` : ''}`
 })
 
@@ -48,6 +49,7 @@ function showSourceLabel(item: EvidenceSourceItem): boolean {
 
 function typeBadge(item: EvidenceSourceItem): string {
   const type = String(item.source_type || '')
+  if (type === 'external_knowledge') return t('evidence.external_knowledge')
   if (type === 'web') return t('evidence.web')
   if (type === 'document') return t('evidence.document')
   return t('evidence.internal')
@@ -80,9 +82,14 @@ function openSource(item: EvidenceSourceItem) {
     emit('open-source', item)
     return
   }
-  if (item.source_url) {
-    window.open(item.source_url, '_blank', 'noopener,noreferrer')
+  const url = item.source_url
+  if (url && /^https?:\/\//i.test(url)) {
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
+}
+
+function openExternalUrl(url: string) {
+  if (/^https?:\/\//i.test(url)) window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -130,7 +137,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         </header>
 
         <div class="flex-1 overflow-y-auto px-5 py-5">
-          <div class="grid grid-cols-3 gap-2">
+          <div class="grid gap-2" :class="sourceStats.external ? 'grid-cols-4' : 'grid-cols-3'">
             <div class="rounded-lg border border-slate-200 px-3 py-2">
               <div class="text-lg font-semibold text-slate-950">{{ sourceStats.total }}</div>
               <div class="text-xs text-slate-500">{{ t('evidence.total_sources') }}</div>
@@ -142,6 +149,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <div class="rounded-lg border border-slate-200 px-3 py-2">
               <div class="text-lg font-semibold text-slate-950">{{ sourceStats.internal }}</div>
               <div class="text-xs text-slate-500">{{ t('evidence.internal') }}</div>
+            </div>
+            <div v-if="sourceStats.external" class="rounded-lg border border-slate-200 px-3 py-2">
+              <div class="text-lg font-semibold text-slate-950">{{ sourceStats.external }}</div>
+              <div class="text-xs text-slate-500">{{ t('evidence.external_knowledge') }}</div>
             </div>
           </div>
 
@@ -167,8 +178,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                   </div>
                   <div class="shrink-0 text-xs font-medium text-slate-500">{{ groupCitationLabel(group) || `[${idx + 1}]` }}</div>
                 </div>
+                <div v-if="group.primary.source_type === 'external_knowledge'" class="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+                  <button v-if="group.primary.source_url" type="button" class="inline-flex min-h-11 items-center text-sm font-medium text-blue-600 hover:text-blue-700" @click="openExternalUrl(group.primary.source_url)">{{ t('evidence.open_external_document') }}</button>
+                </div>
                 <button
-                  v-if="canOpenSource(group.primary)"
+                  v-else-if="canOpenSource(group.primary)"
                   type="button"
                   class="mt-3 inline-flex min-h-11 items-center gap-2 rounded-md text-sm font-medium text-blue-600 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   @click="openSource(group.primary)"

@@ -13,6 +13,7 @@ import oss2
 from app.core.config import get_settings
 from app.services.local_file_signing import sign_local_file_url
 from app.services.local_file_secret import resolve_local_file_signing_secret
+from app.utils.public_file_urls import normalize_legacy_file_urls, public_file_url
 
 
 class _LocalBucketProxy:
@@ -96,7 +97,7 @@ class ObjectStorageClient:
         if absolute:
             return f"{self.backend_internal_base_url}/api/files/{quoted}"
         if self.file_public_base_url:
-            return f"{self.file_public_base_url}{path}"
+            return public_file_url(self.file_public_base_url, path)
         return path
 
     def upload_file(self, local_file_path: str, user_id: str) -> str:
@@ -312,18 +313,16 @@ class ObjectStorageClient:
         if not markdown:
             return markdown
         if self.storage_backend == "local":
-            prefixes = {
-                self.file_public_path_prefix.rstrip("/"),
-                "/api/files",
-            }
-            refreshed = markdown
-            for prefix in prefixes:
-                pattern = re.compile(rf"{re.escape(prefix)}/[^\s)>\]\"']+")
-                refreshed = pattern.sub(
-                    lambda match: self._refresh_url_string(match.group(0)),
-                    refreshed,
-                )
-            return refreshed
+            refreshed = normalize_legacy_file_urls(
+                markdown, self.file_public_base_url, self.file_public_path_prefix
+            )
+            pattern = re.compile(r"(?:https?://|/)[^\s)>\]\"']+")
+
+            def _refresh_local_url(match: re.Match[str]) -> str:
+                url = match.group(0)
+                return self._refresh_url_string(url) if self.object_path_from_url(url) else url
+
+            return pattern.sub(_refresh_local_url, refreshed)
 
         endpoint_host = self.endpoint.split("//", 1)[-1].strip("/")
         asset_host = f"{self.bucket_name}.{endpoint_host}"

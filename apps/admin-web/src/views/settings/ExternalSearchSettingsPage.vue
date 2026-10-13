@@ -78,7 +78,7 @@
           <path d="M9 12h6" />
           <path d="M9 16h4" />
         </svg>
-        <span>{{ t('文档解析') }}</span>
+        <span>{{ t('knowledgeSource.pageTitle') }}</span>
       </button>
       <button class="settings-nav-item" :class="{ active: activeSection === 'topic-admission' }" type="button" @click="switchSection('topic-admission')">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>
@@ -388,16 +388,18 @@
     <main v-else class="settings-main">
       <div class="settings-header">
         <div>
-          <div class="settings-title">{{ t('知识库问答调试') }}</div>
-          <div class="settings-subtitle">{{ t('调整少量关键参数，观察内部知识库问答的命中片段、引用来源和回答质量。') }}</div>
+          <div class="settings-title">{{ t('knowledgeSource.pageTitle') }}</div>
+          <div class="settings-subtitle">{{ t('knowledgeSource.pageSubtitle') }}</div>
         </div>
         <n-space>
-          <n-button secondary :loading="knowledgeLoading" @click="loadKnowledgeParseSettings">{{ t('刷新') }}</n-button>
-          <n-button type="primary" :loading="knowledgeSaving" @click="saveKnowledgeParse">{{ t('保存') }}</n-button>
+          <n-tag v-if="hasKnowledgeEdits" type="warning" round>{{ t('knowledgeSource.unsaved') }}</n-tag>
+          <n-button secondary :loading="knowledgeLoading" @click="refreshKnowledgeConfiguration">{{ t('刷新') }}</n-button>
+          <n-button type="primary" :loading="knowledgeSaving || knowledgeSourceRef?.saving" @click="saveKnowledgeConfiguration">{{ t('保存') }}</n-button>
         </n-space>
       </div>
 
-      <n-spin :show="knowledgeLoading">
+      <KnowledgeSourceSettingsPanel ref="knowledgeSourceRef" @mode-change="knowledgeSourceMode = $event" />
+      <n-spin v-if="knowledgeSourceMode === 'movo'" :show="knowledgeLoading">
         <section class="knowledge-settings-panel">
           <n-form class="provider-form knowledge-form" label-placement="top">
             <div class="knowledge-config-card">
@@ -654,8 +656,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue';
-import { useMessage } from 'naive-ui';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { NAlert, useMessage } from 'naive-ui';
 import axios from 'axios';
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
 import { t, useLocale } from '@/composables/i18n';
@@ -667,6 +669,7 @@ import PresentationSettingsPanel from '@/components/settings/PresentationSetting
 import ShortcutSettingsPanel from '@/components/settings/ShortcutSettingsPanel.vue';
 import ShortcutSchemeOverview from '@/components/settings/ShortcutSchemeOverview.vue';
 import TopicAdmissionPanel from '@/components/settings/TopicAdmissionPanel.vue';
+import KnowledgeSourceSettingsPanel from '@/components/settings/KnowledgeSourceSettingsPanel.vue';
 import {
   fetchExternalSearchProviders,
   saveExternalSearchProvider,
@@ -707,10 +710,28 @@ const activeSection = ref<SettingsSection>('general');
 const hasShortcutSchemes = Boolean(adminProductUiExtension.shortcutSettingsExtension);
 const shortcutView = ref<ShortcutView>(hasShortcutSchemes ? 'schemes' : 'default');
 const shortcutSettingsRef = ref<InstanceType<typeof ShortcutSettingsPanel> | null>(null);
+const knowledgeSourceRef = ref<InstanceType<typeof KnowledgeSourceSettingsPanel> | null>(null);
+const knowledgeParseSnapshot = ref('');
+const knowledgeParseDirty = computed(() => Boolean(knowledgeParseSnapshot.value) && JSON.stringify(knowledgeForm) !== knowledgeParseSnapshot.value);
+const hasKnowledgeEdits = computed(() => Boolean(knowledgeSourceRef.value?.hasUnsavedChanges) || knowledgeParseDirty.value);
 
 function confirmShortcutNavigation(): boolean {
   if (activeSection.value !== 'shortcuts' || shortcutView.value !== 'default' || !shortcutSettingsRef.value?.hasUnsavedChanges) return true;
   return window.confirm(t('快捷入口有未保存的修改，确定放弃并离开吗？'));
+}
+
+function confirmSettingsNavigation(): boolean {
+  if (!confirmShortcutNavigation()) return false;
+  if (activeSection.value === 'knowledge' && hasKnowledgeEdits.value) {
+    return window.confirm(t('knowledgeSource.unsavedConfirm'));
+  }
+  return true;
+}
+
+function warnBeforeUnload(event: BeforeUnloadEvent) {
+  if (activeSection.value !== 'knowledge' || !hasKnowledgeEdits.value) return;
+  event.preventDefault();
+  event.returnValue = '';
 }
 
 function sectionFromPath(path: string): SettingsSection {
@@ -737,7 +758,7 @@ function switchShortcutView(view: ShortcutView) {
 }
 
 function switchSection(section: SettingsSection) {
-  if (section !== activeSection.value && !confirmShortcutNavigation()) return;
+  if (section !== activeSection.value && !confirmSettingsNavigation()) return;
   activeSection.value = section;
   const target = sectionRouteMap[section];
   if (route.path !== target) {
@@ -745,8 +766,8 @@ function switchSection(section: SettingsSection) {
   }
 }
 
-onBeforeRouteLeave(() => confirmShortcutNavigation());
-onBeforeRouteUpdate(() => confirmShortcutNavigation());
+onBeforeRouteLeave(() => confirmSettingsNavigation());
+onBeforeRouteUpdate(() => confirmSettingsNavigation());
 
 watch(
   () => route.path,
@@ -855,6 +876,7 @@ const pageCollectionSettings = ref<PageCollectionSettings | null>(null);
 const pageCollectionLoading = ref(false);
 const pageCollectionSaving = ref(false);
 const knowledgeLoading = ref(false);
+const knowledgeSourceMode = ref<'movo' | 'external'>('movo');
 const knowledgeSaving = ref(false);
 const showKnowledgeAdvanced = ref(false);
 
@@ -1060,6 +1082,7 @@ async function loadKnowledgeParseSettings() {
   try {
     const settings = await fetchKnowledgeSettings();
     applyKnowledgeSettings(settings);
+    knowledgeParseSnapshot.value = JSON.stringify(knowledgeForm);
   } finally {
     knowledgeLoading.value = false;
   }
@@ -1116,10 +1139,23 @@ async function saveKnowledgeParse() {
     knowledgeForm.vectorStore.tenantIsolation = true;
     const saved = await saveKnowledgeSettings(JSON.parse(JSON.stringify(knowledgeForm)));
     applyKnowledgeSettings(saved);
+    knowledgeParseSnapshot.value = JSON.stringify(knowledgeForm);
     message.success(t('配置已保存'));
   } finally {
     knowledgeSaving.value = false;
   }
+}
+
+async function saveKnowledgeConfiguration() {
+  if (!await knowledgeSourceRef.value?.save()) return;
+  if (knowledgeParseDirty.value) {
+    await saveKnowledgeParse();
+  }
+}
+
+async function refreshKnowledgeConfiguration() {
+  if (hasKnowledgeEdits.value && !window.confirm(t('knowledgeSource.unsavedConfirm'))) return;
+  await Promise.all([knowledgeSourceRef.value?.load(), loadKnowledgeParseSettings()]);
 }
 
 async function runTest() {
@@ -1175,10 +1211,12 @@ async function runTest() {
 }
 
 onMounted(() => {
+  window.addEventListener('beforeunload', warnBeforeUnload);
   loadProviders();
   loadPageCollection();
   loadKnowledgeParseSettings();
 });
+onBeforeUnmount(() => window.removeEventListener('beforeunload', warnBeforeUnload));
 </script>
 
 <style scoped>

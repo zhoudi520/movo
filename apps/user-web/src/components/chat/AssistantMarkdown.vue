@@ -7,7 +7,10 @@ const props = withDefaults(defineProps<{ content: string; compact?: boolean; fil
   compact: true,
   fileReferences: false,
 })
-const emit = defineEmits<{ (event: 'open-file', path: string): void }>()
+const emit = defineEmits<{
+  (event: 'open-file', path: string): void
+  (event: 'image-preview', payload: { src: string; alt: string }): void
+}>()
 
 const html = computed(() => renderAssistantMarkdown(props.content, { workspaceFileReferences: props.fileReferences }))
 
@@ -15,6 +18,11 @@ function fileReference(target: EventTarget | null): HTMLElement | null {
   return target instanceof Element ? target.closest<HTMLElement>('[data-workspace-file]') : null
 }
 async function handleClick(event: Event) {
+  if (event.target instanceof HTMLImageElement) {
+    event.preventDefault()
+    emit('image-preview', { src: event.target.currentSrc || event.target.src, alt: event.target.alt })
+    return
+  }
   const copyButton = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('.assistant-code-copy') : null
   if (copyButton) {
     const code = copyButton.closest('.assistant-code-block')?.querySelector('code')?.textContent
@@ -40,6 +48,11 @@ async function handleClick(event: Event) {
 }
 function openFileByKeyboard(event: KeyboardEvent) {
   if (!['Enter', ' '].includes(event.key)) return
+  if (event.target instanceof HTMLImageElement) {
+    event.preventDefault()
+    emit('image-preview', { src: event.target.currentSrc || event.target.src, alt: event.target.alt })
+    return
+  }
   const reference = fileReference(event.target)
   const path = reference?.dataset.workspaceFile
   if (!path) return
@@ -135,6 +148,8 @@ function openFileByKeyboard(event: KeyboardEvent) {
 
 .assistant-markdown :deep(a) { color: #1d5fb8; text-underline-offset: 3px; }
 .assistant-markdown :deep(a:hover) { color: #174a91; }
+.assistant-markdown :deep(img) { cursor: zoom-in; }
+.assistant-markdown :deep(img:focus-visible) { outline: 2px solid #3b82f6; outline-offset: 3px; }
 .assistant-markdown :deep(hr) { border-color: var(--assistant-rule); }
 .assistant-markdown :deep(blockquote) { margin: 1em 0; padding: .35em 1em; border-left: 3px solid var(--assistant-quote-border); background: var(--assistant-quote-bg); color: inherit; }
 .assistant-markdown :deep(table) { display: block; max-width: 100%; overflow-x: auto; border-color: var(--assistant-rule); font-size: .94em; }

@@ -25,7 +25,7 @@ import {
 import type { ExecutionStoreV3 } from '../features/execution-v3/stores/executionStore'
 import type { DshTaskChangeSet } from '../platform/types'
 import { isExecutionEventV3, type ExecutionEventV3 } from '../features/execution-v3/domain/protocol'
-import { ensureMessageExecutionV3 } from '../features/execution-v3/stores/messageExecution'
+import { ensureMessageExecutionV3, reconcileMessageExecutionSnapshot } from '../features/execution-v3/stores/messageExecution'
 import { refreshAfterRun } from './chatRuntimeRefresh'
 import { applyAssistantContentEvent } from '../features/execution-v3/domain/assistantContent'
 import type { BrowserAssistanceHandoff } from './browser/useBrowserWorkspace'
@@ -431,6 +431,9 @@ async function refreshPaneLiveState(pane: ChatRuntimePane, generation: number, s
   if (detail.code_project !== undefined) pane.codeProject = detail.code_project
   pane.shared = detail.access === 'shared' || (detail.participant_count ?? 0) > 0
   pane.messages = mergeAuthoritativeMessages(pane.messages, detail.messages || []).messages
+  for (const message of pane.messages) {
+    if (message.role === 'assistant') reconcileMessageExecutionSnapshot(message)
+  }
   updateForeignRun(pane, detail.active_run, auth.userId)
   if (!pane.foreignRun) pane.foreignRunFinished = false
   // T8: the snapshot may have materialized rows for early foreign frames;

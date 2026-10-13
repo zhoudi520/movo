@@ -971,6 +971,7 @@ const forbiddenElementsText = ref('');
 const styleInputProfile = ref<Record<string, any>>({});
 const styleContractJson = ref<Record<string, any>>({});
 const styleSkillMarkdown = ref('');
+const styleMarkdownContractSnapshot = ref('');
 const writingSkillOptions = ref<Array<{ label: string; value: string }>>([]);
 const activeScriptStep = computed(() => workflowSteps.value.find((item) => item.id === activeScriptStepId.value && item.type === 'script_plugin') || null);
 const toolRows = ref<ExternalToolItem[]>([]);
@@ -1746,6 +1747,7 @@ function hydrateWritingStyle(source: SkillItem) {
       ? { ...config.input_profile }
       : { ...contract };
   styleSkillMarkdown.value = String(config.skillMarkdown || config.skill_markdown || '').trim();
+  styleMarkdownContractSnapshot.value = JSON.stringify(buildWritingStyleContractJson());
 }
 
 function isSameStepSnapshot(left: unknown, right: string[]): boolean {
@@ -2436,6 +2438,7 @@ async function enrichWritingStyle() {
     styleInputProfile.value = result.inputProfile || {};
     styleSkillMarkdown.value = String(result.skillMarkdown || '').trim();
     applyWritingStyleContract(result.contractJson || buildWritingStyleContractJson());
+    styleMarkdownContractSnapshot.value = JSON.stringify(buildWritingStyleContractJson());
     message.success(t('workflow.style_enrich_success'));
   } catch (error: any) {
     message.error(error?.response?.data?.detail || error?.message || t('workflow.style_enrich_failed'));
@@ -2453,6 +2456,12 @@ async function saveWritingStyle(): Promise<boolean> {
       ...(styleInputProfile.value || {}),
       ...contractJson,
     };
+    // The structured fields are authoritative once edited. Sending an empty
+    // Markdown asks the API to compile the current contract instead of
+    // republishing instructions generated for an older draft.
+    const skillMarkdown = JSON.stringify(contractJson) === styleMarkdownContractSnapshot.value
+      ? styleSkillMarkdown.value
+      : '';
     const updated = await persistSkill({
       name: skill.value.name,
       description: skill.value.description,
@@ -2463,7 +2472,7 @@ async function saveWritingStyle(): Promise<boolean> {
         ...(skill.value.config || {}),
         inputProfile,
         contractJson,
-        skillMarkdown: styleSkillMarkdown.value,
+        skillMarkdown,
       },
     });
     if (!updated) return false;

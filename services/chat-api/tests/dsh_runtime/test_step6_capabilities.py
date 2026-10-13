@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import pytest
 
 from app.dsh_runtime.profile.tools import ToolProfileCompiler
 from app.enterprise_capabilities.data import MetricsEngine
@@ -13,6 +14,14 @@ from app.enterprise_capabilities.runtime import WORKFLOW_CAPABILITY_BINDINGS
 from app.enterprise_capabilities.runtime.adapters import build_default_registry, knowledge_search
 from app.enterprise_capabilities.artifacts.references import require_owned_artifact
 from app.enterprise_capabilities.browser.service import browser_task
+
+
+@pytest.fixture(autouse=True)
+def internal_knowledge_source(monkeypatch):
+    async def source(_tenant_id):
+        return {"mode": "movo"}
+
+    monkeypatch.setattr("app.enterprise_capabilities.runtime.adapters.get_knowledge_source", source)
 
 
 class _EmptyExternalCatalog:

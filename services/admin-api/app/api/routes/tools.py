@@ -290,6 +290,14 @@ async def patch_tool(tool_id: str, payload: ToolPatchPayload, current_user: dict
 async def delete_tool(tool_id: str, current_user: dict = Depends(get_current_admin_user)) -> dict[str, str]:
     main_id = str(current_user.get("main_id") or "default")
     db = get_db()
+    binding = await db["knowledge_retrieval_sources"].find_one(
+        {"main_id": main_id, "config.mode": "external", "config.toolId": str(tool_id)}, {"_id": 1}
+    )
+    if binding:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该工具正在被知识库配置引用。请先切换知识检索来源或更换工具并保存，再删除。",
+        )
     result = await db.external_tools.delete_one(organization_tool_query(main_id, _id=str(tool_id)))
     if not result.deleted_count:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="工具连接不存在")

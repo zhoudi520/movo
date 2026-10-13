@@ -201,7 +201,7 @@ export const appRoutes: RouteRecordRaw[] = [
         path: '/settings/knowledge',
         name: 'KnowledgeSettings',
         component: () => import('@/views/settings/ExternalSearchSettingsPage.vue'),
-        meta: { title: '知识库设置', hideInMenu: true },
+        meta: { title: 'knowledgeSource.pageTitle', hideInMenu: true },
       },
       {
         path: '/settings/page-collection',

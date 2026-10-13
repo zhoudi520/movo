@@ -13,11 +13,13 @@ import ChatComposer from './chat/ChatComposer.vue'
 import SessionRunNotice from './chat/SessionRunNotice.vue'
 import AssistantMarkdown from './chat/AssistantMarkdown.vue'
 import MatchedReportList from './chat/MatchedReportList.vue'
+import AssistantImagePreview from './chat/AssistantImagePreview.vue'
 import type { PendingDocument } from './chat/types'
 import { useAuthoritativeMessages } from './chat/useAuthoritativeMessages'
 import { promptGuideCategories, promptGuideUiIcons, type PromptGuideConfigTarget, type PromptGuideItem } from './chat/promptGuideConfig'
 import { effectiveShortcutEntries, resolveShortcutGuideCategories } from './chat/shortcutGuideResolver'
 import { fetchEffectiveShortcuts } from '../api/shortcuts'
+import type { KnowledgeSourceSummary } from '../api/knowledgeSource'
 import PresentationEditor from './PresentationEditor.vue'
 import ExecutionViewV3 from '../features/execution-v3/components/ExecutionViewV3.vue'
 import ArtifactList from './execution/ArtifactList.vue'
@@ -476,6 +478,11 @@ const stickyTurnMinHeightPx = ref(0)
 const isNewSessionView = computed(() => displayMessages.value.length === 0)
 
 const activePromptGuideKey = ref<string | null>(null)
+const knowledgeSourceSummary = ref<KnowledgeSourceSummary>({ mode: 'movo', displayName: '' })
+function setKnowledgeSourceSummary(source: KnowledgeSourceSummary) {
+  knowledgeSourceSummary.value = source
+  if (source.mode === 'external' && activePromptGuideKey.value === 'internal') promptGuideNotice.value = null
+}
 const effectivePromptGuideCategories = ref(promptGuideCategories)
 const promptGuideNotice = ref<{
   title: string
@@ -490,7 +497,17 @@ const visiblePromptGuideCategories = computed(() => effectivePromptGuideCategori
       (item.categoryKey !== 'content' || allowContent.value)
       && (item.categoryKey !== 'internal' || allowKnowledge.value)
       && (item.categoryKey !== 'systems' || allowTools.value)) }
-    : category)
+    : category.key === 'internal' && knowledgeSourceSummary.value.mode === 'external'
+      ? {
+        ...category,
+        label: knowledgeSourceSummary.value.displayName,
+        requiresConfig: false,
+        items: category.items.map(item => ({
+          ...item,
+          prompt: item.prompt?.replaceAll('内部知识库', knowledgeSourceSummary.value.displayName),
+        })),
+      }
+      : category)
   .filter((category) => {
     if (category.key === 'content') return allowContent.value
     if (category.key === 'internal') return allowKnowledge.value
@@ -2207,6 +2224,7 @@ function formatErrorMessage(raw: string): string {
                   :content="segment.content"
                   :file-references="Boolean(props.codeSession)"
                   @open-file="(path) => emit('open-code-file', path)"
+                  @image-preview="({ src, alt }) => openImagePreview(src, alt)"
                 />
                 <MatchedReportList
                   v-else-if="segment.kind === 'reports'"
@@ -2402,6 +2420,7 @@ function formatErrorMessage(raw: string): string {
         @stop="emit('stop')"
         @select-model="selectChatModel"
         @image-preview="({ src, alt }) => openImagePreview(src, alt)"
+        @knowledge-source="setKnowledgeSourceSummary"
       >
         <template #context>
           <CodeDraftContextBar
@@ -2569,24 +2588,12 @@ function formatErrorMessage(raw: string): string {
       </div>
     </div>
   </div>
-  <div
+  <AssistantImagePreview
     v-if="imagePreviewOpen"
-    class="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
-    @click="closeImagePreview"
-  >
-    <button
-      class="absolute right-5 top-5 rounded-full bg-black/60 px-3 py-1 text-xl text-white"
-      @click.stop="closeImagePreview"
-    >
-      ×
-    </button>
-    <img
-      :src="imagePreviewSrc"
-      :alt="imagePreviewAlt"
-      class="max-h-[90vh] max-w-[92vw] rounded-xl bg-white object-contain shadow-2xl"
-      @click.stop
-    />
-  </div>
+    :src="imagePreviewSrc"
+    :alt="imagePreviewAlt"
+    @close="closeImagePreview"
+  />
 
   </BrowserWorkspace>
 

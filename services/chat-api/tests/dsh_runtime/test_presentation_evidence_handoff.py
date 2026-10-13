@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import pytest
 
 from app.enterprise_capabilities.presentation.evidence import presentation_tool_observations
 from app.enterprise_capabilities.runtime import CapabilityExecutionContext
 from app.enterprise_capabilities.runtime import adapters
 from app.knowledge.retrieval.schemas import RetrievalChunkItem, RetrievalSearchResult
+
+
+@pytest.fixture(autouse=True)
+def internal_knowledge_source(monkeypatch):
+    async def source(_tenant_id):
+        return {"mode": "movo"}
+
+    monkeypatch.setattr(adapters, "get_knowledge_source", source)
 
 
 def _context(**turn_context) -> CapabilityExecutionContext:

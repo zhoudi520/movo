@@ -222,6 +222,24 @@ def build_user_evidence_payload(bundle: Dict[str, Any]) -> Dict[str, Any]:
     for idx, item in enumerate(list(bundle.get("results") or [])[:20], start=1):
         if not isinstance(item, dict):
             continue
+        meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+        if meta.get("provenance") == "external_knowledge":
+            key = str(item.get("source_url") or item.get("title") or f"external-{idx}")
+            if key in seen:
+                continue
+            seen.add(key)
+            row = {
+                "id": f"ev_{idx}",
+                "title": str(item.get("title") or "外部知识库")[:180],
+                "source_name": str(meta.get("source_name") or item.get("source") or "外部知识库")[:120],
+                "source_type": "external_knowledge",
+                "snippet": str(item.get("summary") or "")[:520],
+            }
+            source_url = str(item.get("source_url") or "")
+            if source_url.startswith(("http://", "https://")):
+                row["source_url"] = source_url[:800]
+            sources.append(row)
+            continue
         tool = str(item.get("tool") or "").strip().lower()
         title = str(item.get("title") or "").strip()
         summary = str(item.get("summary") or item.get("content") or "").strip()
@@ -300,6 +318,7 @@ def build_user_evidence_payload(bundle: Dict[str, Any]) -> Dict[str, Any]:
     web_count = len([x for x in sources if x.get("source_type") == "web"])
     kb_count = len([x for x in sources if x.get("source_type") in {"kb", "internal"}])
     doc_count = len([x for x in sources if x.get("source_type") == "document"])
+    external_count = len([x for x in sources if x.get("source_type") == "external_knowledge"])
     parts: List[str] = []
     if web_count:
         parts.append(f"网页资料 {web_count} 条")
@@ -307,6 +326,8 @@ def build_user_evidence_payload(bundle: Dict[str, Any]) -> Dict[str, Any]:
         parts.append(f"内部知识库 {kb_count} 条")
     if doc_count:
         parts.append(f"文档资料 {doc_count} 条")
+    if external_count:
+        parts.append(f"外部知识库 {external_count} 条")
     summary = f"本次生成参考了 {len(sources)} 条资料" if sources else "本次生成使用了已提取事实"
     if parts:
         summary += "，其中" + "，".join(parts)

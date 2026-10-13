@@ -1,5 +1,5 @@
 import type { ArtifactItem, EvidenceBundleItem } from '../domain/delivery'
-import type { ExecutionEventV3 } from '../domain/protocol'
+import { isExecutionEventV3, type ExecutionEventV3 } from '../domain/protocol'
 import { createExecutionStoreV3, type ExecutionStoreV3 } from './executionStore'
 
 type PersistedDocument = Partial<ArtifactItem> & { type?: string }
@@ -66,4 +66,13 @@ export function ensureMessageExecutionV3(message: ExecutionMessageV3): Execution
 
   message._execV3 = store
   return store
+}
+
+/** Reconcile durable events into an already-live store after a session snapshot replaces its message row. */
+export function reconcileMessageExecutionSnapshot(message: ExecutionMessageV3): void {
+  const store = message._execV3
+  if (!store) return
+  for (const event of message.execution_events || []) {
+    if (isExecutionEventV3(event)) store.applyEvent(event)
+  }
 }

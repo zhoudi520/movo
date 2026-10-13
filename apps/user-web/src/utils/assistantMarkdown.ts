@@ -70,7 +70,7 @@ export function renderAssistantMarkdown(text: string, options: { workspaceFileRe
     return key
   }
 
-  html = html.replace(/!\[(.*?)\]\((.*?)\)/g, '<img alt="$1" src="$2" style="max-width:100%; border-radius:12px;" />')
+  html = html.replace(/!\[(.*?)\]\((.*?)\)/g, '<img alt="$1" src="$2" role="button" tabindex="0" style="max-width:100%; border-radius:12px;" />')
   html = html.replace(/^---+$/gm, '<hr class="my-4 border-gray-300"/>')
 
   html = html.replace(/`([^`]+)`/g, (_match, raw) => {

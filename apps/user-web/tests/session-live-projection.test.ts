@@ -27,6 +27,7 @@ import {
   startChatStream,
 } from '../src/composables/useChatStream'
 import { createExecutionStoreV3 } from '../src/features/execution-v3/stores/executionStore'
+import { reconcileMessageExecutionSnapshot } from '../src/features/execution-v3/stores/messageExecution'
 import type { ExecutionEventV3 } from '../src/features/execution-v3/domain/protocol'
 
 // The store harness needs a require shim before its axios CJS chain is loaded.
@@ -61,6 +62,7 @@ function execEvent(eventId: string, streamSeq: number, type: ExecutionEventV3['t
 type TestRow = ProjectionMessage & {
   _id?: string
   _execV3?: ReturnType<typeof createExecutionStoreV3>
+  execution_events?: ExecutionEventV3[]
 }
 
 function userRow(overrides: TestRow = {}): TestRow {
@@ -205,6 +207,35 @@ t08('happy', 'snapshot reconciliation keeps one ordered user row per message and
   assert.strictEqual(assistants[0]._execV3, execStore, 'the execution store survives the snapshot')
   assert.equal(assistants[0]._execV3?.state.rawEvents.length, 1)
   assert.equal((existing[0] as { _id?: string })._id, 'u-opt', 'the optimistic row keeps its runtime identity')
+})
+
+t08('happy', 'durable snapshot retires the live provisional answer before rendering its final body', () => {
+  const store = createExecutionStoreV3()
+  store.applyEvent(execEvent('run-start', 1, 'run.started'))
+  store.applyEvent({
+    ...execEvent('answer-delta', 2), item_kind: 'final_answer', item_id: 'answer-1',
+    revision: 2, payload: { text: '年假按司龄', provisional: true },
+  })
+  assert.equal(store.visibleItems.value.some((item) => item.kind === 'final_answer'), true)
+  const completed: ExecutionEventV3 = {
+    ...execEvent('answer-completed', 3, 'item.completed'), item_kind: 'final_answer',
+    item_id: 'answer-1', revision: 3, payload: { text: '年假按司龄计算。', provisional: false },
+  }
+  const terminal = execEvent('run-completed', 4, 'run.completed')
+  const existing: TestRow[] = [{ role: 'assistant', message_id: 'assistant-1', _id: 'local-row', content: '', _execV3: store }]
+  const snapshot: TestRow[] = [{
+    role: 'assistant', message_id: 'assistant-1', content: '年假按司龄计算。',
+    execution_events: [completed, terminal],
+  }]
+  const merged = mergeAuthoritativeMessages(existing, snapshot).messages[0]
+  assert.strictEqual(merged._execV3, store)
+  reconcileMessageExecutionSnapshot(merged)
+  assert.equal(merged.content, '年假按司龄计算。')
+  assert.equal(store.visibleItems.value.some((item) => item.kind === 'final_answer'), false)
+  assert.equal(store.state.runStatus, 'completed')
+  const eventCount = store.state.rawEvents.length
+  reconcileMessageExecutionSnapshot(merged)
+  assert.equal(store.state.rawEvents.length, eventCount, 'repeated snapshots are idempotent')
 })
 
 t08('happy', 'execution dedupes by event_id alone and the effective id maps the optimistic row', () => {

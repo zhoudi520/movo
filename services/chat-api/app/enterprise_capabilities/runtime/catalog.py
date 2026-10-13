@@ -152,8 +152,8 @@ class InternalCapabilityCatalog:
             ),
             _definition(
                 capability_ref="knowledge.search@v1", tool_name="knowledge_search", domain="knowledge",
-                display_name="内部知识检索",
-                description="Search MOVO's server-authorized internal knowledge for enterprise-specific facts, policies, documents, or prior internal context. Use web_search for a bounded public lookup, progressive_research for multi-source public research, and combine internal and public evidence only when the user asks for a comparison. Tenant and knowledge-base scope are injected by MOVO; never ask for or supply them as arguments.",
+                display_name="企业知识检索",
+                description="Search the server-configured enterprise knowledge source for enterprise-specific facts, policies or documents. The source may be MOVO or an authorized external knowledge service. Use web_search for public information. Tenant and knowledge scope are injected by MOVO; never supply them as arguments.",
                 input_schema=_object({
                     "query": {"type": "string", "minLength": 1},
                     "top_n": {"type": "integer", "minimum": 1, "maximum": 20},

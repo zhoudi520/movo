@@ -19,6 +19,9 @@ from app.knowledge.retrieval.retrieval_client import KnowledgeRetrievalError
 from app.enterprise_capabilities.knowledge_result import unavailable_result
 from app.services.runtime_parse_service import runtime_parse_service
 from app.services.rag_service.internal_knowledge_qa_service import internal_knowledge_qa_service
+from app.enterprise_capabilities.knowledge_source.config import get_knowledge_source
+from app.enterprise_capabilities.knowledge_source.execution import search_external_knowledge
+from app.enterprise_capabilities.knowledge_source.evidence import build_external_knowledge_evidence
 from app.enterprise_capabilities.research.progressive.provider_router import ProviderRouter
 from app.enterprise_capabilities.research.progressive.agent import ProgressiveResearchAgent
 from app.infrastructure.request_context import reset_request_context, set_request_context
@@ -73,6 +76,18 @@ def _artifact_output_spec(arguments: dict[str, Any], key: str) -> dict[str, Any]
 async def knowledge_search(arguments: dict[str, Any], context: CapabilityExecutionContext) -> dict[str, Any]:
     selected = [str(item) for item in list(context.turn_context.get("knowledge_base_ids") or []) if str(item)]
     query = str(arguments.get("query") or "")
+    source = await get_knowledge_source(context.tenant_id)
+    if source.get("mode") == "external":
+        try:
+            result = await search_external_knowledge(
+                query=query, main_id=context.tenant_id, user_id=context.user_id, config=source,
+            )
+            bundle = build_external_knowledge_evidence(query=query, mapped=result)
+            result["evidence_bundle"] = public_capability_evidence(bundle)
+            result["_execution_evidence_bundle"] = bundle
+            return result
+        except (ValueError, PermissionError) as exc:
+            return {"success": False, "retrieval_status": "failed", "message": str(exc), "answer": ""}
     try:
         payload = await internal_knowledge_qa_service.answer(
             query=query,

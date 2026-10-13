@@ -5,11 +5,15 @@ import { reviewWorkflowMessages } from './reviewWorkflowMessages'
 import { skillWorkflowEditorMessages } from './skillWorkflowEditorMessages'
 import { workflowNodeUsageMessages } from './workflowNodeUsageMessages'
 import { reportMatchMessages } from './reportMatchMessages'
+import { imagePreviewMessages } from './imagePreviewMessages'
 
 export type Locale = 'zh' | 'en'
 export type MessageValue = string | Record<Locale, string>
 
 export const messages = {
+  'chat.external_knowledge_name': { zh: '仅基于{name}', en: '{name} only' },
+  'evidence.external_knowledge': { zh: '外部知识库', en: 'External knowledge' },
+  'evidence.open_external_document': { zh: '在原知识库打开', en: 'Open in source system' },
   ...uncoveredMessages,
   ...knowledgeMessages,
   ...shortcutMessages,
@@ -17,6 +21,7 @@ export const messages = {
   ...skillWorkflowEditorMessages,
   ...workflowNodeUsageMessages,
   ...reportMatchMessages,
+  ...imagePreviewMessages,
   // Existing execution / generic labels
   'phase.thinking': { zh: '思考中', en: 'Thinking' },
   'phase.searching': { zh: '搜索中', en: 'Searching' },

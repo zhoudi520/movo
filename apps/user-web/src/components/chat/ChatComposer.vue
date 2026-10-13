@@ -2,9 +2,10 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ChatModelOption } from '../../api/models'
 import { fetchSelectableSkills, type SelectableSkillItem } from '../../api/skills'
+import { fetchKnowledgeSourceSummary, type KnowledgeSourceSummary } from '../../api/knowledgeSource'
 import { t, useLocale } from '../../composables/i18n'
 import type { ChatDocumentKind, PendingDocument } from './types'
-import { NModal } from 'naive-ui'
+import { NModal, useMessage } from 'naive-ui'
 import SkillFeedbackPanel from '../skills/SkillFeedbackPanel.vue'
 import ComposerActionButton from './ComposerActionButton.vue'
 import { useComposerAutofocus } from '../../composables/useComposerAutofocus'
@@ -36,9 +37,11 @@ const emit = defineEmits<{
   (e: 'stop'): void
   (e: 'select-model', modelId: string): void
   (e: 'image-preview', payload: { src: string; alt: string }): void
+  (e: 'knowledge-source', source: KnowledgeSourceSummary): void
 }>()
 
 const { locale } = useLocale()
+const message = useMessage()
 
 const userInput = ref('')
 const composerInputRef = ref<HTMLTextAreaElement | null>(null)
@@ -51,6 +54,19 @@ const documentInputRef = ref<HTMLInputElement | null>(null)
 const attachmentMenuOpen = ref(false)
 const attachmentMenuRef = ref<HTMLElement | null>(null)
 const knowledgeQaEnabled = ref(false)
+const knowledgeSource = ref<KnowledgeSourceSummary>({ mode: 'movo', displayName: '' })
+const knowledgeLabel = computed(() => knowledgeSource.value.mode === 'external'
+  ? t('chat.external_knowledge_name', { name: knowledgeSource.value.displayName })
+  : t('chat.knowledge_qa'))
+async function refreshKnowledgeSource() {
+  if (!props.userId) return
+  try {
+    const source = await fetchKnowledgeSourceSummary()
+    if (!props.userId) return
+    knowledgeSource.value = source
+    emit('knowledge-source', source)
+  } catch { /* retain the last known source label during a transient request failure */ }
+}
 const modelDropdownOpen = ref(false)
 const modelSelectorRef = ref<HTMLElement | null>(null)
 const skillPickerOpen = ref(false)
@@ -131,6 +147,7 @@ function selectDocumentAttachment() {
 
 function toggleKnowledgeQa() {
   if (props.allowKnowledge === false) return
+  void refreshKnowledgeSource()
   knowledgeQaEnabled.value = !knowledgeQaEnabled.value
   closeAttachmentMenu()
 }
@@ -205,10 +222,19 @@ function onDocumentSelected(event: Event) {
   const input = event.target as HTMLInputElement
   if (!input.files || input.files.length === 0) return
   const files = Array.from(input.files)
+  const unsupportedNames: string[] = []
   for (const file of files) {
     const kind = detectDocumentType(file)
-    if (!kind) continue
+    if (!kind) {
+      unsupportedNames.push(file.name)
+      continue
+    }
     pendingDocuments.value.push({ file, kind })
+  }
+  if (unsupportedNames.length) {
+    message.error(locale.value === 'zh'
+      ? `不支持的文件类型：${unsupportedNames.join('、')}`
+      : `Unsupported file type: ${unsupportedNames.join(', ')}`)
   }
   input.value = ''
 }
@@ -527,6 +553,7 @@ defineExpose({
 
 onMounted(() => {
   document.addEventListener('pointerdown', onGlobalPointerDown)
+  void refreshKnowledgeSource()
 })
 
 onBeforeUnmount(() => {
@@ -539,6 +566,8 @@ onBeforeUnmount(() => {
 })
 
 watch(() => props.userId, () => {
+  knowledgeSource.value = { mode: 'movo', displayName: '' }
+  void refreshKnowledgeSource()
   closeSkillPicker()
   selectedSkill.value = null
   skillPickerItems.value = []
@@ -633,7 +662,7 @@ watch(() => props.allowSkills, (allowed) => {
             <path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4"></path>
             <path d="M12 17h.01"></path>
           </svg>
-          <span>{{ t('chat.knowledge_qa_active') }}</span>
+          <span>{{ knowledgeLabel }}</span>
           <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
             <path d="M18 6 6 18"></path>
             <path d="m6 6 12 12"></path>
@@ -818,7 +847,7 @@ watch(() => props.allowSkills, (allowed) => {
                 <path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4"></path>
                 <path d="M12 17h.01"></path>
               </svg>
-              {{ t('chat.knowledge_qa') }}
+              {{ knowledgeLabel }}
             </button>
           </div>
         </div>

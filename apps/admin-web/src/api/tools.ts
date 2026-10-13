@@ -17,7 +17,7 @@ export interface ExternalToolItem {
   lastTestStatus: TestStatus;
   lastTestAt: string;
   lastTestMessage: string;
-  discoveredTools: Array<{ name: string; description: string; inputSchema?: Record<string, any> }>;
+  discoveredTools: Array<{ name: string; description: string; inputSchema?: Record<string, any>; outputSchema?: Record<string, any> }>;
   createdAt: string;
   updatedAt: string;
 }
