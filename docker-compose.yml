@@ -162,6 +162,8 @@ services:
       DSH_RUNTIME_HOST_URL: http://dsh-runtime-host:8101
       DSH_TOOL_GATEWAY_URL: http://chat-api:8000/internal/dsh/tools
       DSH_MODEL_GATEWAY_URL: http://chat-api:8000/internal/dsh/model/generate
+      MOVO_EMBED_AUTO_PROVISION: "true"
+      MOVO_EMBED_LOGIN_ENABLED: "true"
     volumes:
       - deployment-secrets:/run/askai-secrets:ro
       - askai-storage:/app/storage
