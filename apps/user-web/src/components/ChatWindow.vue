@@ -12,6 +12,7 @@ import CodeDraftContextBar from './code/CodeDraftContextBar.vue'
 import ChatComposer from './chat/ChatComposer.vue'
 import SessionRunNotice from './chat/SessionRunNotice.vue'
 import AssistantMarkdown from './chat/AssistantMarkdown.vue'
+import MatchedReportList from './chat/MatchedReportList.vue'
 import type { PendingDocument } from './chat/types'
 import { useAuthoritativeMessages } from './chat/useAuthoritativeMessages'
 import { promptGuideCategories, promptGuideUiIcons, type PromptGuideConfigTarget, type PromptGuideItem } from './chat/promptGuideConfig'
@@ -38,7 +39,11 @@ import { ensureMessageExecutionV3 } from '../features/execution-v3/stores/messag
 import { downloadResourceUrl, openPreviewResource, saveBlobDownload } from '../utils/desktopResources'
 import { normalizeAssistantContent, renderAssistantMarkdown, sanitizeMermaid } from '../utils/assistantMarkdown'
 import type { DshCodeSession, DshExecutionEvent, DshPendingApproval, DshTaskChangeSet, DshWorkspace } from '../platform/types'
-import { capabilities } from '../platform'
+import { capabilities, hostReportOpenAvailable, openHostReport, HostReportOpenError } from '../platform'
+import { useReportFavorites } from '../composables/useReportFavorites'
+import { hasCompleteReportMatches, splitAssistantReportSegments, type AssistantContentSegment } from '../utils/reportMatchParse'
+import type { ReportMatchItem } from '../features/chat/reportMatch'
+import { createDiscreteApi } from 'naive-ui'
 import type { DesktopToolLauncherKind, DesktopToolTab } from './desktop/desktopToolTabs'
 import type { AgentPolicySnapshot } from '../api/auth'
 import { listSessionParticipants } from '../api/sessionSharing'
@@ -690,6 +695,53 @@ function toTimeLabel(value?: string) {
 
 function isAssistantGenerating(idx: number, msg: Message): boolean {
   return !!isLoading.value && msg.role === 'assistant' && idx === displayMessages.value.length - 1
+}
+
+const reportFavorites = useReportFavorites()
+const { message: reportMatchToast } = createDiscreteApi(['message'])
+const canOpenHostReports = computed(() => hostReportOpenAvailable())
+
+const reportMatchByMessageKey = computed(() => {
+  const map = new Map<string, AssistantContentSegment[]>()
+  displayMessages.value.forEach((msg, idx) => {
+    if (msg.role !== 'assistant') return
+    const key = msg._id || msg.message_id || `idx:${idx}`
+    const raw = msg.content || ''
+    if (isAssistantGenerating(idx, msg) && !hasCompleteReportMatches(raw)) {
+      map.set(key, raw ? [{ kind: 'text', content: raw }] : [])
+      return
+    }
+    map.set(key, splitAssistantReportSegments(raw))
+  })
+  return map
+})
+
+function reportSegmentsForMessage(msg: Message, idx: number): AssistantContentSegment[] {
+  const key = msg._id || msg.message_id || `idx:${idx}`
+  const segments = reportMatchByMessageKey.value.get(key)
+  if (segments?.length) return segments
+  return msg.content ? [{ kind: 'text', content: msg.content }] : []
+}
+
+async function onOpenReportMatch(item: ReportMatchItem) {
+  try {
+    await openHostReport({
+      functionId: item.functionId,
+      menuPath: item.menuPath,
+      name: item.name,
+    })
+  } catch (error) {
+    if (error instanceof HostReportOpenError && error.code === 'desktop_required') {
+      reportMatchToast.warning(t('report.match.open_unavailable'))
+      return
+    }
+    reportMatchToast.error(t('report.match.open_failed'))
+  }
+}
+
+function onFavoriteReportMatch(item: ReportMatchItem) {
+  const favorited = reportFavorites.toggleFavorite(item)
+  reportMatchToast.success(favorited ? t('report.match.favorited') : t('report.match.unfavorited'))
 }
 
 function onPermissionResolve(msg: Message, requestId: string, decision: 'allow' | 'deny' | 'always_allow') {
@@ -2139,19 +2191,32 @@ function formatErrorMessage(raw: string): string {
 
             <!-- Content -->
             <template v-if="msg.role === 'assistant'">
-              <div
-                v-if="msg.content && isPlainAssistantText(msg.content)"
-                class="assistant-content text-[14px] text-gray-900 leading-6 whitespace-pre-wrap"
+              <template
+                v-for="(segment, segmentIdx) in reportSegmentsForMessage(msg, idx)"
+                :key="`${msg._id || msg.message_id || idx}-segment-${segmentIdx}-${segment.kind}`"
               >
-                {{ normalizeAssistantContent(msg.content) }}
-              </div>
-              <AssistantMarkdown
-                v-else-if="msg.content"
-                class="assistant-content"
-                :content="msg.content"
-                :file-references="Boolean(props.codeSession)"
-                @open-file="(path) => emit('open-code-file', path)"
-              />
+                <div
+                  v-if="segment.kind === 'text' && isPlainAssistantText(segment.content)"
+                  class="assistant-content text-[14px] text-gray-900 leading-6 whitespace-pre-wrap"
+                >
+                  {{ normalizeAssistantContent(segment.content) }}
+                </div>
+                <AssistantMarkdown
+                  v-else-if="segment.kind === 'text'"
+                  class="assistant-content"
+                  :content="segment.content"
+                  :file-references="Boolean(props.codeSession)"
+                  @open-file="(path) => emit('open-code-file', path)"
+                />
+                <MatchedReportList
+                  v-else-if="segment.kind === 'reports'"
+                  :items="segment.items"
+                  :is-favorite="reportFavorites.isFavorite"
+                  :open-enabled="canOpenHostReports"
+                  @open="onOpenReportMatch"
+                  @favorite="onFavoriteReportMatch"
+                />
+              </template>
               <CodeTaskChangeCard
                 v-if="msg._codeChanges && props.codeSession"
                 class="mt-3"

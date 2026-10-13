@@ -90,5 +90,8 @@ export const onEmbeddedBrowserState: (listener: (state: EmbeddedBrowserState) =>
 export const onEmbeddedBrowserLayoutRequest: (listener: () => void) => () => void = impl.onEmbeddedBrowserLayoutRequest
 export const openResource: (url: string, purpose?: BrowserPurpose | 'external') => Promise<void> = impl.openResource
 export const saveBytes: (filename: string, bytes: Uint8Array) => Promise<SaveResult> = impl.saveBytes
+export const openHostReport: (request: import('./types').HostReportOpenRequest) => Promise<void> = impl.openHostReport
+export const hostReportOpenAvailable: () => boolean = impl.hostReportOpenAvailable
 
-export type { AgentStatus, BrowserBounds, BrowserOwner, BrowserPreviewFrame, BrowserPurpose, DesktopUpdatePhase, DesktopUpdateState, DshCodeSession, DshDirectoryEntry, DshExecutionEvent, DshFileDiff, DshFilePreview, DshGitBranchRef, DshGitBranchSnapshot, DshGitCommitResult, DshGitPushResult, DshPendingApproval, DshTaskChangeSet, DshTaskFileDiff, DshTerminalEvent, DshTurnCancelResult, DshWorkspace, DshWorkspaceInspection, DshWorkspaceSummary, EmbeddedBrowserState, EnterpriseConnectionResult, PlatformCapabilities, SaveResult, Settings } from './types'
+export type { AgentStatus, BrowserBounds, BrowserOwner, BrowserPreviewFrame, BrowserPurpose, DesktopUpdatePhase, DesktopUpdateState, DshCodeSession, DshDirectoryEntry, DshExecutionEvent, DshFileDiff, DshFilePreview, DshGitBranchRef, DshGitBranchSnapshot, DshGitCommitResult, DshGitPushResult, DshPendingApproval, DshTaskChangeSet, DshTaskFileDiff, DshTerminalEvent, DshTurnCancelResult, DshWorkspace, DshWorkspaceInspection, DshWorkspaceSummary, EmbeddedBrowserState, EnterpriseConnectionResult, HostReportOpenRequest, LocalizedName, PlatformCapabilities, SaveResult, Settings } from './types'
+export { HostReportOpenError } from './types'

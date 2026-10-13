@@ -256,3 +256,28 @@ export interface BrowserPreviewFrame {
 }
 
 export interface SaveResult { saved: boolean; path?: string }
+
+export interface LocalizedName {
+  CHS?: string
+  CHT?: string
+  EN?: string
+}
+
+export interface HostReportOpenRequest {
+  functionId: string
+  menuPath: string
+  name?: LocalizedName
+}
+
+export type HostReportOpenErrorCode = 'desktop_required' | 'host_failed'
+
+/** Raised when the host cannot open a G3 report entry. */
+export class HostReportOpenError extends Error {
+  readonly code: HostReportOpenErrorCode
+
+  constructor(code: HostReportOpenErrorCode, message?: string) {
+    super(message || code)
+    this.name = 'HostReportOpenError'
+    this.code = code
+  }
+}

@@ -1,7 +1,8 @@
 // Web implementation of the platform adapter.
 // Desktop-only features are stubbed or proxied to localStorage.
 
-import type { AgentStatus, BrowserBounds, BrowserOwner, BrowserPreviewFrame, BrowserPurpose, DesktopUpdateState, DshCodeSession, DshDirectoryEntry, DshExecutionEvent, DshFileDiff, DshFilePreview, DshGitCommitResult, DshGitPushResult, DshPendingApproval, DshTaskChangeSet, DshTaskFileDiff, DshTerminalEvent, DshWorkspace, DshWorkspaceInspection, DshWorkspaceSummary, EmbeddedBrowserState, EnterpriseConnectionResult, PlatformCapabilities, SaveResult, Settings } from './types'
+import type { AgentStatus, BrowserBounds, BrowserOwner, BrowserPreviewFrame, BrowserPurpose, DesktopUpdateState, DshCodeSession, DshDirectoryEntry, DshExecutionEvent, DshFileDiff, DshFilePreview, DshGitCommitResult, DshGitPushResult, DshPendingApproval, DshTaskChangeSet, DshTaskFileDiff, DshTerminalEvent, DshWorkspace, DshWorkspaceInspection, DshWorkspaceSummary, EmbeddedBrowserState, EnterpriseConnectionResult, HostReportOpenRequest, PlatformCapabilities, SaveResult, Settings } from './types'
+import { HostReportOpenError } from './types'
 import { detectSystemLocale } from '../composables/i18n'
 import { getBrowserTimezone } from '../composables/appTimezone'
 
@@ -133,6 +134,15 @@ export function onEmbeddedBrowserLayoutRequest(_listener: () => void) { return (
 
 export async function openResource(url: string, _purpose?: BrowserPurpose | 'external') {
   window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+/** Web clients cannot open G3 host reports; callers should surface a desktop hint. */
+export async function openHostReport(_request: HostReportOpenRequest): Promise<void> {
+  throw new HostReportOpenError('desktop_required')
+}
+
+export function hostReportOpenAvailable(): boolean {
+  return false
 }
 
 export async function saveBytes(filename: string, bytes: Uint8Array): Promise<SaveResult> {

@@ -4,6 +4,7 @@ import { shortcutMessages } from './shortcutMessages'
 import { reviewWorkflowMessages } from './reviewWorkflowMessages'
 import { skillWorkflowEditorMessages } from './skillWorkflowEditorMessages'
 import { workflowNodeUsageMessages } from './workflowNodeUsageMessages'
+import { reportMatchMessages } from './reportMatchMessages'
 
 export type Locale = 'zh' | 'en'
 export type MessageValue = string | Record<Locale, string>
@@ -15,6 +16,7 @@ export const messages = {
   ...reviewWorkflowMessages,
   ...skillWorkflowEditorMessages,
   ...workflowNodeUsageMessages,
+  ...reportMatchMessages,
   // Existing execution / generic labels
   'phase.thinking': { zh: '思考中', en: 'Thinking' },
   'phase.searching': { zh: '搜索中', en: 'Searching' },

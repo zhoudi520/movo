@@ -80,5 +80,6 @@ export function installDesktopUiTestHarness() {
     },
     browser: { state: async () => ({ session_id: 'default', active: false, visible: false, purpose: 'automation', owner: 'agent', url: '', title: '', loading: false, canGoBack: false, canGoForward: false, controllable: false, active_tab_id: '', tabs: [] }), selectSession: async () => {}, activateSession: async () => {}, attachSurface: async () => {}, showSurface: async () => {}, hideSurface: async () => {}, setSurfaceBounds: async () => {}, show: async () => {}, hide: async () => {}, setBounds: async () => {}, open: async () => {}, history: async () => {}, reload: async () => {}, newTab: async () => {}, selectTab: async () => {}, closeTab: async () => {}, setOwner: async () => {}, onState: () => () => {}, onLayoutRequest: () => () => {} },
     resources: { open: async () => {}, saveBytes: async () => ({ saved: false }) },
+    host: { openReport: async () => {} },
   }
 }

@@ -1,4 +1,5 @@
-import type { AgentStatus, BrowserBounds, BrowserOwner, BrowserPreviewFrame, BrowserPurpose, DesktopUpdateState, DshCodeSession, DshDirectoryEntry, DshExecutionEvent, DshFileDiff, DshFilePreview, DshGitBranchSnapshot, DshGitCommitResult, DshGitPushResult, DshPendingApproval, DshTaskChangeSet, DshTaskFileDiff, DshTerminalEvent, DshTurnCancelResult, DshWorkspace, DshWorkspaceInspection, DshWorkspaceSummary, EmbeddedBrowserState, EnterpriseConnectionResult, PlatformCapabilities, SaveResult, Settings } from './types'
+import type { AgentStatus, BrowserBounds, BrowserOwner, BrowserPreviewFrame, BrowserPurpose, DesktopUpdateState, DshCodeSession, DshDirectoryEntry, DshExecutionEvent, DshFileDiff, DshFilePreview, DshGitBranchSnapshot, DshGitCommitResult, DshGitPushResult, DshPendingApproval, DshTaskChangeSet, DshTaskFileDiff, DshTerminalEvent, DshTurnCancelResult, DshWorkspace, DshWorkspaceInspection, DshWorkspaceSummary, EmbeddedBrowserState, EnterpriseConnectionResult, HostReportOpenRequest, PlatformCapabilities, SaveResult, Settings } from './types'
+import { HostReportOpenError } from './types'
 
 interface ElectronApi {
   settings: { get(): Promise<Settings>; update(next: Settings): Promise<Settings> }
@@ -71,6 +72,9 @@ interface ElectronApi {
   resources: {
     open(url: string, purpose?: BrowserPurpose | 'external'): Promise<void>
     saveBytes(filename: string, bytes: Uint8Array): Promise<SaveResult>
+  }
+  host?: {
+    openReport(request: HostReportOpenRequest): Promise<void>
   }
 }
 
@@ -165,3 +169,25 @@ export const onEmbeddedBrowserState = (listener: (state: EmbeddedBrowserState) =
 export const onEmbeddedBrowserLayoutRequest = (listener: () => void) => api().browser.onLayoutRequest(listener)
 export const openResource = (url: string, purpose?: BrowserPurpose | 'external') => api().resources.open(url, purpose)
 export const saveBytes = (filename: string, bytes: Uint8Array) => api().resources.saveBytes(filename, bytes)
+
+/** Open a G3 report through the desktop host bridge when available. */
+export async function openHostReport(request: HostReportOpenRequest): Promise<void> {
+  const bridge = api().host?.openReport
+  if (typeof bridge !== 'function') {
+    throw new HostReportOpenError('desktop_required')
+  }
+  try {
+    await bridge(request)
+  } catch (error) {
+    if (error instanceof HostReportOpenError) throw error
+    throw new HostReportOpenError('host_failed', error instanceof Error ? error.message : String(error))
+  }
+}
+
+export function hostReportOpenAvailable(): boolean {
+  try {
+    return typeof api().host?.openReport === 'function'
+  } catch {
+    return false
+  }
+}
