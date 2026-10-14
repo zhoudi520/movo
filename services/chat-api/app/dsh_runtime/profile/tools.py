@@ -17,6 +17,7 @@ from app.governance.position_policy import EmployeePolicyResolver
 from app.product.resource_access import filter_allowed_resource_ids
 
 from .mcp_schema import McpSchemaCompatibilityError, normalize_mcp_schema
+from .tool_governance import http_connection_governance, mcp_discovered_tool_governance
 
 
 logger = logging.getLogger(__name__)
@@ -132,12 +133,9 @@ class ToolProfileCompiler:
 
     def _compile_http(self, row: dict[str, Any]) -> ToolProfileDefinition:
         config = self._dict(row.get("config"))
-        method = str(config.get("method") or "GET").upper()
-        explicit_risk = str(config.get("riskLevel") or config.get("risk_level") or "").lower()
-        risk = explicit_risk if explicit_risk in {"read", "write", "dangerous"} else (
-            "read" if method in {"GET", "HEAD", "OPTIONS"} else "write"
-        )
-        approval = bool(config.get("approvalRequired", config.get("approval_required", risk != "read")))
+        governance = http_connection_governance(config)
+        risk = governance["risk_level"]
+        approval = governance["approval_required"]
         tool_id = str(row.get("id") or "")
         payload = {
             "source_type": "http",
@@ -173,10 +171,9 @@ class ToolProfileCompiler:
             if not native_name:
                 continue
             annotations = self._dict(discovered.get("annotations"))
-            read_only = annotations.get("readOnlyHint") is True
-            destructive = annotations.get("destructiveHint") is True
-            risk = "dangerous" if destructive else ("read" if read_only else "write")
-            approval = bool(config.get("approvalRequired", config.get("approval_required", risk != "read")))
+            governance = mcp_discovered_tool_governance(config=config, annotations=annotations)
+            risk = governance["risk_level"]
+            approval = governance["approval_required"]
             try:
                 input_schema = normalize_mcp_schema(
                     discovered.get("inputSchema"), object_root=True, schema_name="inputSchema",

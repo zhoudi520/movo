@@ -258,6 +258,7 @@
               <div>
                 <div class="section-title">{{ t('发现 MCP 工具') }}</div>
                 <div class="muted">{{ t('保存 MCP 服务后发现远程服务暴露的 tools，并选择允许 Agent 使用的项。') }}</div>
+                <div class="muted">{{ t('审批与风险标签按运行时 Tool Profile 规则预览，修改连接 config 后会自动刷新。') }}</div>
               </div>
               <n-button type="primary" :disabled="!editingId" :loading="discovering" @click="discoverTools">
                 <template #icon><n-icon><SearchOutline /></n-icon></template>
@@ -273,7 +274,18 @@
                   :checked="selectedMcpToolNames.includes(tool.name)"
                   @update:checked="(checked: boolean) => toggleMcpTool(tool.name, checked)"
                 >
-                  {{ tool.name }} <span class="muted">{{ tool.description }}</span>
+                  <div class="mcp-tool-option">
+                    <div class="mcp-tool-option-name">{{ tool.name }}</div>
+                    <div v-if="governanceFor(tool.name)" class="mcp-governance-tags">
+                      <n-tag size="small" :type="governanceRiskTagType(governanceFor(tool.name)!.risk_level)" :bordered="false">
+                        {{ governanceRiskLabel(governanceFor(tool.name)!.risk_level) }}
+                      </n-tag>
+                      <n-tag size="small" :type="governanceFor(tool.name)!.approval_required ? 'warning' : 'success'" :bordered="false">
+                        {{ governanceFor(tool.name)!.approval_required ? t('治理预览：需审批') : t('治理预览：无需审批') }}
+                      </n-tag>
+                    </div>
+                    <span v-if="tool.description" class="muted">{{ tool.description }}</span>
+                  </div>
                 </n-checkbox>
               </n-space>
               <span v-if="!discoveredTools.length" class="muted">{{ t('还没有发现 MCP tools。') }}</span>
@@ -470,7 +482,9 @@ import {
   type ToolType,
 } from '../api/tools'
 import { formatAppShortDateTime, parseAppDate } from '../composables/appTimezone'
+import { useMcpGovernancePreview } from '../composables/useMcpGovernancePreview'
 import { enabledMcpToolNames, mcpActivationError, nextMcpToolSelection, toolStatusConfirmText } from '../utils/toolActivation'
+import type { ToolGovernancePreviewItem } from '../api/tools'
 
 type SchemaType = 'String' | 'Integer' | 'Number' | 'Boolean' | 'Object' | 'Array' | 'ArrayObject'
 type ParamLocation = 'Header' | 'Query' | 'Body' | 'Path'
@@ -635,6 +649,24 @@ const testResultOk = ref(false)
 const discoveredTools = ref<ExternalToolItem['discoveredTools']>([])
 
 const form = ref<ToolPayload>(emptyForm('http'))
+const { governanceFor, refreshGovernancePreview } = useMcpGovernancePreview({
+  userId: () => props.userId || '',
+  mainId: () => props.mainId,
+  form,
+  discoveredTools,
+})
+
+function governanceRiskLabel(risk: ToolGovernancePreviewItem['risk_level']): string {
+  if (risk === 'dangerous') return t('治理预览：风险高危')
+  if (risk === 'write') return t('治理预览：风险写入')
+  return t('治理预览：风险只读')
+}
+
+function governanceRiskTagType(risk: ToolGovernancePreviewItem['risk_level']): 'success' | 'warning' | 'error' {
+  if (risk === 'dangerous') return 'error'
+  if (risk === 'write') return 'warning'
+  return 'success'
+}
 const selectedMcpToolNames = computed(() => enabledMcpToolNames(form.value.config))
 const enabledSwitch = computed({
   get: () => form.value.status === 'active',
@@ -1260,6 +1292,7 @@ function hydrateEditor(row: ExternalToolItem) {
   testResultText.value = ''
   testResult.value = null
   testResultOk.value = false
+  void refreshGovernancePreview()
 }
 
 function openCreate(type: ToolType) {
@@ -1381,6 +1414,7 @@ async function discoverTools() {
       form.value.status = 'disabled'
     }
     message.success(result.message || t('发现 {count} 个 MCP tools', { count: discoveredTools.value.length }))
+    await refreshGovernancePreview()
     await loadRows()
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('发现 MCP tools 失败'))
@@ -2092,6 +2126,24 @@ watch(() => [props.userId, props.mainId], () => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.mcp-tool-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.mcp-tool-option-name {
+  font-weight: 600;
+  color: #101c3d;
+}
+
+.mcp-governance-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .test-result {

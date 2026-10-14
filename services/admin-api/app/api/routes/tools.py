@@ -352,6 +352,33 @@ async def generate_tool_description(payload: ToolDescriptionGeneratePayload, cur
     return _backend_data(_request_backend("POST", "/generate-description", main_id, body))
 
 
+class ToolGovernancePreviewPayload(BaseModel):
+    type: str = Field(default="mcp", pattern=r"^(http|mcp)$")
+    config: dict[str, Any] = Field(default_factory=dict)
+    discoveredTools: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@router.post("/governance-preview")
+async def preview_tool_governance_draft(
+    payload: ToolGovernancePreviewPayload,
+    current_user: dict = Depends(get_current_admin_user),
+) -> Any:
+    main_id = str(current_user.get("main_id") or "default")
+    return _backend_data(_request_backend("POST", "/governance-preview", main_id, payload.model_dump()))
+
+
+@router.post("/{tool_id}/governance-preview")
+async def preview_tool_governance(
+    tool_id: str,
+    current_user: dict = Depends(get_current_admin_user),
+) -> Any:
+    main_id = str(current_user.get("main_id") or "default")
+    db = get_db()
+    if not await db.external_tools.find_one(organization_tool_query(main_id, _id=str(tool_id)), {"_id": 1}):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="企业工具连接不存在")
+    return _backend_data(_request_backend("POST", f"/{tool_id}/governance-preview", main_id, {}))
+
+
 async def ensure_indexes() -> None:
     db = get_db()
     await db.external_tools.create_index([("main_id", 1), ("updated_at", -1)])

@@ -5,6 +5,10 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from app.dsh_runtime.profile.tool_governance import (
+    http_connection_governance,
+    preview_mcp_governance,
+)
 from app.services.external_tools import external_tool_registry, external_tool_service
 from app.api.principal import ApiPrincipal, require_api_principal
 from app.product.resource_access import filter_allowed_resource_ids, resource_is_allowed
@@ -31,6 +35,12 @@ class ToolDescriptionGeneratePayload(BaseModel):
     name: str = Field(default="", min_length=1, max_length=120)
     type: str = Field(default="http")
     existingDescription: str = Field(default="")
+
+
+class ToolGovernancePreviewPayload(BaseModel):
+    type: str = Field(default="mcp", pattern=r"^(http|mcp)$")
+    config: dict[str, Any] = Field(default_factory=dict)
+    discoveredTools: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ToolPayload(BaseModel):
@@ -216,6 +226,48 @@ async def discover_user_mcp_tools(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return ApiResponse(data=data)
+
+
+@router.post("/external-tools/governance-preview", response_model=ApiResponse)
+async def preview_external_tool_governance(
+    payload: ToolGovernancePreviewPayload,
+    main_id: str = Query("default", alias="mainId"),
+) -> ApiResponse:
+    del main_id
+    tool_type = str(payload.type or "mcp").strip().lower()
+    if tool_type == "http":
+        gov = http_connection_governance(payload.config)
+        items = [{"name": "__http__", **gov}]
+    else:
+        items = preview_mcp_governance(config=payload.config, discovered_tools=payload.discoveredTools)
+    return ApiResponse(data={"type": tool_type, "items": items})
+
+
+@router.post("/external-tools/{tool_id}/governance-preview", response_model=ApiResponse)
+async def preview_saved_external_tool_governance(
+    tool_id: str,
+    main_id: str = Query("default", alias="mainId"),
+    principal: ApiPrincipal = Depends(require_api_principal),
+) -> ApiResponse:
+    if principal.kind == "end_user" and not await resource_is_allowed(
+        "tool", main_id=principal.main_id, user_id=principal.user_id, resource_id=tool_id,
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="当前用户无权使用该工具")
+    doc = await external_tool_service.get(tool_id, main_id)
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="工具连接不存在")
+    tool_type = str(doc.get("type") or "http").strip().lower()
+    config = dict(doc.get("config") or {})
+    if tool_type == "http":
+        items = [{"name": "__http__", **http_connection_governance(config)}]
+    elif tool_type == "mcp":
+        items = preview_mcp_governance(
+            config=config,
+            discovered_tools=list(doc.get("discoveredTools") or []),
+        )
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的工具类型")
+    return ApiResponse(data={"type": tool_type, "items": items})
 
 
 @router.post("/external-tools/generate-description", response_model=ApiResponse)

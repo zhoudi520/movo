@@ -17,7 +17,13 @@ export interface ExternalToolItem {
   lastTestStatus: TestStatus;
   lastTestAt: string;
   lastTestMessage: string;
-  discoveredTools: Array<{ name: string; description: string; inputSchema?: Record<string, any>; outputSchema?: Record<string, any> }>;
+  discoveredTools: Array<{
+    name: string;
+    description: string;
+    inputSchema?: Record<string, any>;
+    outputSchema?: Record<string, any>;
+    annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
+  }>;
   createdAt: string;
   updatedAt: string;
 }
@@ -94,5 +100,30 @@ export async function generateToolDescription(payload: {
   existingDescription?: string;
 }): Promise<{ description: string }> {
   const { data } = await apiClient.post<{ description: string }>('/api/tools/generate-description', payload);
+  return data;
+}
+
+export interface ToolGovernancePreviewItem {
+  name: string;
+  risk_level: 'read' | 'write' | 'dangerous';
+  approval_required: boolean;
+  read_only_hint?: boolean;
+  destructive_hint?: boolean;
+  http_method?: string;
+}
+
+export async function previewToolGovernance(payload: {
+  type: ToolType;
+  config: Record<string, any>;
+  discoveredTools?: ExternalToolItem['discoveredTools'];
+}): Promise<{ type: ToolType; items: ToolGovernancePreviewItem[] }> {
+  const { data } = await apiClient.post<{ type: ToolType; items: ToolGovernancePreviewItem[] }>(
+    '/api/tools/governance-preview',
+    {
+      type: payload.type,
+      config: payload.config,
+      discoveredTools: payload.discoveredTools || [],
+    },
+  );
   return data;
 }

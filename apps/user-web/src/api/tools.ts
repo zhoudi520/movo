@@ -24,7 +24,12 @@ export interface ExternalToolItem {
   lastTestStatus: TestStatus
   lastTestAt: string
   lastTestMessage: string
-  discoveredTools: Array<{ name: string; description: string; inputSchema?: Record<string, any> }>
+  discoveredTools: Array<{
+    name: string
+    description: string
+    inputSchema?: Record<string, any>
+    annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean }
+  }>
   createdAt: string
   updatedAt: string
 }
@@ -93,6 +98,35 @@ export async function testDraftTool(userId: string, mainId: string, payload: Too
 export async function discoverMcpTools(id: string, userId: string, mainId: string): Promise<{ success: boolean; message: string; tools: ExternalToolItem['discoveredTools'] }> {
   const res = await api.post(`/external-tools/my/${id}/discover`, {}, { params: params(userId, mainId), timeout: 90000 })
   return dataOf<{ success: boolean; message: string; tools: ExternalToolItem['discoveredTools'] }>(res)
+}
+
+export interface ToolGovernancePreviewItem {
+  name: string
+  risk_level: 'read' | 'write' | 'dangerous'
+  approval_required: boolean
+  read_only_hint?: boolean
+  destructive_hint?: boolean
+}
+
+export async function previewToolGovernance(
+  userId: string,
+  mainId: string,
+  payload: {
+    type: ToolType
+    config: Record<string, any>
+    discoveredTools?: ExternalToolItem['discoveredTools']
+  },
+): Promise<{ type: ToolType; items: ToolGovernancePreviewItem[] }> {
+  const res = await api.post(
+    '/external-tools/governance-preview',
+    {
+      type: payload.type,
+      config: payload.config,
+      discoveredTools: payload.discoveredTools || [],
+    },
+    { params: params(userId, mainId), timeout: 15000 },
+  )
+  return dataOf<{ type: ToolType; items: ToolGovernancePreviewItem[] }>(res)
 }
 
 export async function generateToolDescription(payload: {

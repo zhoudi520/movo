@@ -195,6 +195,7 @@
                   <div>
                     <div class="section-title">{{ t('发现 MCP 工具') }}</div>
                     <div class="section-muted">{{ t('保存连接后发现远程服务暴露的工具，并选择允许 Agent 使用的项。') }}</div>
+                    <div class="section-muted">{{ t('审批与风险标签按运行时 Tool Profile 规则预览，修改连接 config 后会自动刷新。') }}</div>
                   </div>
                   <n-button type="primary" :loading="discovering" :disabled="!toolId" @click="discoverTools">
                     <template #icon><ToolIcon name="search" /></template>
@@ -209,6 +210,14 @@
                       <n-checkbox :checked="enabledToolNames.includes(tool.name)" @update:checked="(checked: boolean) => toggleMcpTool(tool.name, checked)" />
                       <div>
                         <div class="mcp-tool-name">{{ tool.name }}</div>
+                        <div v-if="governanceFor(tool.name)" class="mcp-governance-tags">
+                          <n-tag size="small" :type="governanceRiskTagType(governanceFor(tool.name)!.risk_level)" :bordered="false">
+                            {{ governanceRiskLabel(governanceFor(tool.name)!.risk_level) }}
+                          </n-tag>
+                          <n-tag size="small" :type="governanceFor(tool.name)!.approval_required ? 'warning' : 'success'" :bordered="false">
+                            {{ governanceFor(tool.name)!.approval_required ? t('治理预览：需审批') : t('治理预览：无需审批') }}
+                          </n-tag>
+                        </div>
                         <div class="section-muted">{{ tool.description || t('无描述') }}</div>
                       </div>
                     </div>
@@ -412,9 +421,11 @@ import {
   discoverMcpTools,
   fetchTool,
   generateToolDescription,
+  previewToolGovernance,
   testTool,
   updateTool,
   type ExternalToolItem,
+  type ToolGovernancePreviewItem,
   type ToolPayload,
   type ToolType,
 } from '@/api/tools';
@@ -595,6 +606,8 @@ const headerRows = ref<HeaderRow[]>([]);
 const inputSchema = ref<SchemaNode[]>([]);
 const outputSchema = ref<SchemaNode[]>([]);
 const discoveredTools = ref<ExternalToolItem['discoveredTools']>([]);
+const governanceByName = ref<Record<string, ToolGovernancePreviewItem>>({});
+const governancePreviewTimer = ref<ReturnType<typeof setTimeout> | null>(null);
 const enabledToolNames = ref<string[]>([]);
 const debugValues = reactive<Record<string, string>>({});
 const debugMcpToolName = ref('');
@@ -1345,6 +1358,53 @@ async function goNextStep() {
   activeStep.value += 1;
 }
 
+function governanceFor(name: string): ToolGovernancePreviewItem | null {
+  const key = String(name || '').trim();
+  return key ? governanceByName.value[key] || null : null;
+}
+
+function governanceRiskLabel(risk: ToolGovernancePreviewItem['risk_level']): string {
+  if (risk === 'dangerous') return t('治理预览：风险高危');
+  if (risk === 'write') return t('治理预览：风险写入');
+  return t('治理预览：风险只读');
+}
+
+function governanceRiskTagType(risk: ToolGovernancePreviewItem['risk_level']): 'success' | 'warning' | 'error' {
+  if (risk === 'dangerous') return 'error';
+  if (risk === 'write') return 'warning';
+  return 'success';
+}
+
+function scheduleGovernancePreview() {
+  if (governancePreviewTimer.value !== null) clearTimeout(governancePreviewTimer.value);
+  governancePreviewTimer.value = setTimeout(() => {
+    governancePreviewTimer.value = null;
+    void refreshGovernancePreview();
+  }, 300);
+}
+
+async function refreshGovernancePreview() {
+  if (form.type !== 'mcp' || discoveredTools.value.length === 0) {
+    governanceByName.value = {};
+    return;
+  }
+  try {
+    const result = await previewToolGovernance({
+      type: 'mcp',
+      config: { ...form.config },
+      discoveredTools: discoveredTools.value,
+    });
+    const next: Record<string, ToolGovernancePreviewItem> = {};
+    for (const item of result.items || []) {
+      const name = String(item.name || '').trim();
+      if (name) next[name] = item;
+    }
+    governanceByName.value = next;
+  } catch {
+    governanceByName.value = {};
+  }
+}
+
 async function discoverTools() {
   if (!toolId.value) return;
   discovering.value = true;
@@ -1358,6 +1418,7 @@ async function discoverTools() {
       form.status = 'disabled';
     }
     message.success(result.message || t('MCP 工具发现完成'));
+    await refreshGovernancePreview();
   } catch (error: any) {
     message.error(error?.response?.data?.detail || t('MCP 工具发现失败'));
   } finally {
@@ -1506,6 +1567,7 @@ function applyLoadedTool(tool: ExternalToolItem) {
   enabledToolNames.value = Array.isArray(form.config.enabledToolNames)
     ? [...form.config.enabledToolNames]
     : [];
+  void refreshGovernancePreview();
 }
 
 async function loadTool() {
@@ -1533,6 +1595,14 @@ watch(
   () => {
     loadTool();
   },
+);
+
+watch(
+  () => [form.type, form.config, discoveredTools.value] as const,
+  () => {
+    scheduleGovernancePreview();
+  },
+  { deep: true },
 );
 </script>
 
@@ -1857,6 +1927,13 @@ watch(
   align-items: flex-start;
   display: flex;
   gap: 10px;
+}
+
+.mcp-governance-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
 }
 
 .mcp-tool-name {

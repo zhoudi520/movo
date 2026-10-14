@@ -1307,6 +1307,15 @@ export const messages = {
   'MCP 工具发现失败': { 'zh-CN': 'MCP 工具发现失败', 'en-US': 'MCP tool discovery failed' },
   '加载工具配置失败': { 'zh-CN': '加载工具配置失败', 'en-US': 'Failed to load tool configuration' },
   '发现 MCP 工具': { 'zh-CN': '发现 MCP 工具', 'en-US': 'Discover MCP Tools' },
+  '审批与风险标签按运行时 Tool Profile 规则预览，修改连接 config 后会自动刷新。': {
+    'zh-CN': '审批与风险标签按运行时 Tool Profile 规则预览，修改连接 config 后会自动刷新。',
+    'en-US': 'Approval and risk tags follow runtime Tool Profile rules and refresh when connection config changes.',
+  },
+  '治理预览：需审批': { 'zh-CN': '需审批', 'en-US': 'Approval required' },
+  '治理预览：无需审批': { 'zh-CN': '无需审批', 'en-US': 'No approval' },
+  '治理预览：风险只读': { 'zh-CN': '风险：只读', 'en-US': 'Risk: read' },
+  '治理预览：风险写入': { 'zh-CN': '风险：写入', 'en-US': 'Risk: write' },
+  '治理预览：风险高危': { 'zh-CN': '风险：高危', 'en-US': 'Risk: dangerous' },
   '复制失败': { 'zh-CN': '复制失败', 'en-US': 'Copy failed' },
 
   '整数': { 'zh-CN': '整数', 'en-US': 'Integer' },
