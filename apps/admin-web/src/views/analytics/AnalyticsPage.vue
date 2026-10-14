@@ -4,8 +4,9 @@
     <div ref="metricsRef" class="metrics-row">
       <n-card class="metric-card metric-card-orange" :bordered="false">
         <div class="metric-label">{{ t('成本统计') }}</div>
-        <div class="metric-value">¥ {{ formatCost(summary.totalCost) }}</div>
-        <div class="metric-note">{{ t('平均单次 {avg} | 近24h {last24h}', { avg: '¥' + formatCost(summary.avgCost), last24h: '¥' + formatCost(summary.last24hCost) }) }}</div>
+        <div class="metric-value" :title="t('tokenStats.currentRate')">{{ formatCurrencyCosts(summary.costsByCurrency, summary.pricedCallsByCurrency) }}</div>
+        <div v-if="hasPricedCalls" class="metric-note" :title="costDetails">{{ costDetails }}</div>
+        <div v-if="summary.unpricedCalls" class="metric-note">{{ t('tokenStats.unpricedShort', { count: summary.unpricedCalls }) }}</div>
         <div class="metric-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none">
             <path d="M12 2v20M17 5H9.5c-2 0-3.5 1.5-3.5 3.5s1.5 3.5 3.5 3.5h5c2 0 3.5 1.5 3.5 3.5s-1.5 3.5-3.5 3.5H6" />
@@ -70,7 +71,7 @@
         <div class="filter-toolbar">
           <n-space align="center" :size="10" class="filter-left">
             <n-input v-model:value="filters.q" class="filter-search" clearable :placeholder="t('搜索请求 / 模型 / Trace')" />
-            <n-select v-model:value="filters.departmentId" class="filter-select" clearable :options="departmentOptions" :placeholder="t('部门')" />
+            <DirectoryScopePicker v-model="scope" />
             <n-select v-model:value="filters.modelName" class="filter-select" clearable :options="modelOptions" :placeholder="t('模型')" />
             <n-select v-model:value="filters.status" class="filter-select-sm" clearable :options="localizedStatusOptions" :placeholder="t('状态')" />
           </n-space>
@@ -259,6 +260,8 @@ import { NButton, NTag, NTimeline, NTimelineItem, useMessage } from 'naive-ui';
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { t } from '@/composables/i18n';
 import { formatAdminDateTime, formatAdminTime } from '@/composables/adminTimezone';
+import DirectoryScopePicker from '@/components/directory/DirectoryScopePicker.vue';
+import type { DirectoryScope } from '@/api/directoryScope';
 import { fetchTokenStats, fetchTokenStatsDetail, fetchSessionChatHistory, type TokenStatsItem, type TokenStatsOption, type TokenStatsSummary, type TokenStatsDetail, type ChatMessageItem, type SessionChatHistory } from '@/api/token-stats';
 
 const message = useMessage();
@@ -275,10 +278,14 @@ const summary = ref<TokenStatsSummary>({
   last24hTokens: 0,
   activeUsers: 0,
   activeDepartments: 0,
-  totalCost: 0,
-  avgCost: 0,
-  last24hCost: 0,
+  costsByCurrency: { CNY: 0, USD: 0 },
+  pricedCallsByCurrency: { CNY: 0, USD: 0 },
+  avgCostsByCurrency: { CNY: 0, USD: 0 },
+  last24hCostsByCurrency: { CNY: 0, USD: 0 },
+  unpricedCalls: 0,
 });
+const hasPricedCalls = computed(() => Object.values(summary.value.pricedCallsByCurrency).some((count) => count > 0));
+const costDetails = computed(() => `${t('tokenStats.avg')} ${formatCurrencyCosts(summary.value.avgCostsByCurrency, summary.value.pricedCallsByCurrency)} · ${t('tokenStats.last24h')} ${formatCurrencyCosts(summary.value.last24hCostsByCurrency, summary.value.pricedCallsByCurrency)}`);
 const items = ref<TokenStatsItem[]>([]);
 const total = ref(0);
 const page = ref(1);
@@ -290,7 +297,7 @@ const tableCardRef = ref<{ $el?: HTMLElement } | null>(null);
 const tablePaginationRef = ref<HTMLElement | null>(null);
 let tableResizeObserver: ResizeObserver | null = null;
 
-const departmentOptions = ref<TokenStatsOption[]>([]);
+const scope = ref<DirectoryScope>({ level: 'organization', id: '', name: '' });
 const modelOptions = ref<TokenStatsOption[]>([]);
 const statusOptions = ref<TokenStatsOption[]>([]);
 
@@ -323,7 +330,6 @@ const handleViewportResize = () => {
 
 const filters = reactive({
   q: '',
-  departmentId: null as string | null,
   modelName: null as string | null,
   status: null as string | null,
   groupBy: 'user_request',
@@ -810,8 +816,16 @@ function formatNumber(value: number) {
 function formatCost(value: number) {
   const num = Number(value || 0);
   if (num === 0) return '0.00';
+  if (num < 0.0001) return num.toFixed(8);
   if (num < 0.01) return num.toFixed(4);
   return num.toFixed(2);
+}
+
+function formatCurrencyCosts(costs: Record<'CNY' | 'USD', number>, pricedCalls: Record<'CNY' | 'USD', number>) {
+  const parts = (['CNY', 'USD'] as const)
+    .filter((currency) => Number(costs?.[currency] || 0) > 0 || Number(pricedCalls?.[currency] || 0) > 0)
+    .map((currency) => `${currency === 'CNY' ? '¥' : '$'}${formatCost(costs[currency])}`);
+  return parts.length ? parts.join(' + ') : t('tokenStats.unpricedTotal');
 }
 
 function formatTime(value: string | null) {
@@ -823,7 +837,8 @@ async function loadData() {
   try {
     const data = await fetchTokenStats({
       q: filters.q || '',
-      departmentId: filters.departmentId || '',
+      departmentId: scope.value.level === 'department' ? scope.value.id : '',
+      userId: scope.value.level === 'user' ? scope.value.id : '',
       modelName: filters.modelName || '',
       status: filters.status || '',
       offset: (page.value - 1) * pageSize.value,
@@ -833,7 +848,6 @@ async function loadData() {
     summary.value = data.summary;
     items.value = data.items;
     total.value = data.total;
-    departmentOptions.value = data.filterOptions.departments || [];
     modelOptions.value = data.filterOptions.models || [];
     statusOptions.value = data.filterOptions.statuses || [];
   } catch (error) {
@@ -897,7 +911,7 @@ function runSearch() {
 
 function resetFilters() {
   filters.q = '';
-  filters.departmentId = null;
+  scope.value = { level: 'organization', id: '', name: '' };
   filters.modelName = null;
   filters.status = null;
   filters.groupBy = 'user_request';

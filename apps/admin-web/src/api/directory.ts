@@ -60,6 +60,34 @@ export interface UserInviteLinkResult {
   expiresAt: string;
 }
 
+export interface InviteHistoryItem {
+  id: string;
+  token: string;
+  inviteUrl: string;
+  status: 'active' | 'expired' | 'used' | 'revoked';
+  createdAt: string;
+  expiresAt: string;
+  acceptedCount: number;
+  defaultDepartmentId: string | null;
+  primaryRoleId: string;
+  roleIds: string[];
+}
+
+export interface InviteMemberItem {
+  userId: string;
+  name: string;
+  loginName: string;
+  email: string;
+  status: string;
+  joinedAt: string;
+}
+export interface InviteMemberPage {
+  items: InviteMemberItem[];
+  total: number;
+  unattributedCount: number;
+}
+export interface InviteHistoryPage { items: InviteHistoryItem[]; total: number }
+
 export interface InviteLinkDetail {
   purpose: 'register' | 'set_password';
   expiresAt: string;
@@ -164,9 +192,23 @@ export async function enableUser(id: string) {
   return data;
 }
 
-export async function createOrgInviteLink(payload: { defaultDepartmentId?: string | null; expiresHours?: number; primaryRoleId: string; roleIds: string[] }) {
+export async function createOrgInviteLink(payload: { defaultDepartmentId?: string | null; expiresHours?: number; primaryRoleId: string }) {
   const { data } = await apiClient.post<UserInviteLinkResult>('/api/directory/invites', payload || {});
   return data;
+}
+
+export async function fetchOrgInviteHistory(page = 1, pageSize = 20, departmentId?: string, statusFilter?: string) {
+  const { data } = await apiClient.get<InviteHistoryPage>('/api/directory/invites', { params: { page, pageSize, departmentId, statusFilter } });
+  return data;
+}
+
+export async function fetchInviteMembers(id: string, page = 1, pageSize = 25) {
+  const { data } = await apiClient.get<InviteMemberPage>(`/api/directory/invites/${id}/members`, { params: { page, pageSize } });
+  return data;
+}
+
+export async function revokeOrgInvite(id: string) {
+  await apiClient.post(`/api/directory/invites/${id}/revoke`);
 }
 
 export async function fetchInviteLinkDetail(token: string) {

@@ -176,7 +176,9 @@ interface DashboardOverview {
   metrics: {
     calls24h: number;
     tokens24h: number;
-    cost24h: number;
+    costs24hByCurrency: Record<'CNY' | 'USD', number>;
+    pricedCalls24hByCurrency: Record<'CNY' | 'USD', number>;
+    unpricedCalls24h: number;
     activeUsers24h: number;
     activeDepartments24h: number;
     failedCalls24h: number;
@@ -215,7 +217,9 @@ const errorText = ref('');
 const emptyMetrics = {
   calls24h: 0,
   tokens24h: 0,
-  cost24h: 0,
+  costs24hByCurrency: { CNY: 0, USD: 0 },
+  pricedCalls24hByCurrency: { CNY: 0, USD: 0 },
+  unpricedCalls24h: 0,
   activeUsers24h: 0,
   activeDepartments24h: 0,
   failedCalls24h: 0,
@@ -303,8 +307,8 @@ const metricCards = computed(() => [
   {
     key: 'cost',
     label: t('近 24h 成本'),
-    value: `¥${formatCost(metrics.value.cost24h)}`,
-    note: t('按当前估算价计算'),
+    value: formatCurrencyCosts(metrics.value.costs24hByCurrency, metrics.value.pricedCalls24hByCurrency),
+    note: metrics.value.unpricedCalls24h ? t('tokenStats.unpriced', { count: metrics.value.unpricedCalls24h }) : t('tokenStats.currentRate'),
     icon: icons.cost,
   },
   {
@@ -400,7 +404,15 @@ function formatCompact(value: number) {
 }
 
 function formatCost(value: number) {
-  return Number(value || 0).toFixed(2);
+  const amount = Number(value || 0);
+  return amount > 0 && amount < 0.0001 ? amount.toFixed(8) : amount.toFixed(amount < 0.01 ? 4 : 2);
+}
+
+function formatCurrencyCosts(costs: Record<'CNY' | 'USD', number>, pricedCalls: Record<'CNY' | 'USD', number>) {
+  const parts = (['CNY', 'USD'] as const)
+    .filter((currency) => Number(costs?.[currency] || 0) > 0 || Number(pricedCalls?.[currency] || 0) > 0)
+    .map((currency) => `${currency === 'CNY' ? '¥' : '$'}${formatCost(costs[currency])}`);
+  return parts.length ? parts.join(' + ') : t('tokenStats.unpricedTotal');
 }
 
 function formatDuration(value: number) {

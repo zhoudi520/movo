@@ -1427,7 +1427,7 @@ async function refreshUserProfile(token: string, createDefaultSession = false, p
     localStorage.setItem(authUserProfileKey, JSON.stringify(result.data))
     await loadSessions(true).catch(() => {})
     void loadSharedSessions(true).catch(() => {})
-    loginOpen.value = false
+    if (!new URLSearchParams(window.location.search).has('invite_code')) loginOpen.value = false
     // T27: the login/profile resolution confirmed (token login via the SSO
     // client path, page refresh with a stored token, already-logged-in
     // startup) — consume the stashed share link.
@@ -2264,6 +2264,7 @@ onMounted(async () => {
     loginOpen.value = true
     startLocalSession({ shouldNavigate: currentView.value === 'chat' })
   }
+  if (new URLSearchParams(window.location.search).has('invite_code')) loginOpen.value = true
   // Self-heal the desktop agent on boot: if we have a stored session,
   // make sure the Electron settings + sidecar reflect it (no-op on web).
   if (authToken.value && userProfile.value?.userId !== undefined) {

@@ -1,8 +1,8 @@
 <template>
   <div class="page-stack user-page">
     <n-card class="user-card" :bordered="false" size="large">
-      <div class="user-layout">
-        <aside class="dept-panel">
+      <div class="user-layout" :class="{ 'user-layout-collapsed': departmentCollapsed }">
+        <aside v-if="!departmentCollapsed" class="dept-panel">
           <div class="panel-head">
             <span class="panel-title">{{ t('组织架构') }}</span>
             <n-space :size="6">
@@ -63,11 +63,16 @@
 
         <section class="list-panel">
           <div class="toolbar">
-            <n-space :size="10">
-              <n-input v-model:value="keyword" :placeholder="t('搜索姓名/手机号/邮箱')" clearable />
-              <n-select v-model:value="sourceFilter" :options="sourceOptions" :placeholder="t('来源')" clearable style="width: 130px" />
-              <n-select v-model:value="statusFilter" :options="statusOptions" :placeholder="t('状态')" clearable style="width: 120px" />
-            </n-space>
+            <div class="toolbar-leading">
+              <n-button class="department-toggle" text :title="departmentCollapsed ? t('directory.expandDepartments') : t('directory.collapseDepartments')" :aria-label="departmentCollapsed ? t('directory.expandDepartments') : t('directory.collapseDepartments')" @click="departmentCollapsed = !departmentCollapsed">
+                <template #icon><n-icon><MenuUnfoldOutlined v-if="departmentCollapsed" /><MenuFoldOutlined v-else /></n-icon></template>
+              </n-button>
+              <n-space :size="10">
+                <n-input v-model:value="keyword" :placeholder="t('搜索姓名/手机号/邮箱')" clearable />
+                <n-select v-model:value="sourceFilter" :options="sourceOptions" :placeholder="t('来源')" clearable style="width: 130px" />
+                <n-select v-model:value="statusFilter" :options="statusOptions" :placeholder="t('状态')" clearable style="width: 120px" />
+              </n-space>
+            </div>
             <n-space :size="10">
               <n-button :disabled="!selectedUserIds.length" @click="bulkRoleDialogVisible = true">
                 {{ t('批量分配岗位') }}<template v-if="selectedUserIds.length">（{{ selectedUserIds.length }}）</template>
@@ -88,6 +93,7 @@
                 </template>
                 {{ t('邀请用户') }}
               </n-button>
+              <n-button @click="inviteHistoryVisible = true"><template #icon><n-icon><TimeOutline /></n-icon></template>{{ t('inviteHistory.title') }}</n-button>
               <n-button type="primary" @click="openCreateUser">
                 <template #icon>
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -303,8 +309,8 @@
     <n-form :model="inviteForm" label-placement="left" label-width="110">
       <n-grid :cols="2" :x-gap="12">
         <n-grid-item>
-          <n-form-item :label="t('默认部门')">
-            <n-select v-model:value="inviteForm.defaultDepartmentId" :options="departmentOptionsWithRoot" clearable :placeholder="t('默认根部门')" />
+          <n-form-item :label="t('默认部门')" :required="inviteDepartmentRequired">
+            <n-select v-model:value="inviteForm.defaultDepartmentId" :options="inviteDepartmentOptions" :clearable="!inviteDepartmentRequired" :placeholder="inviteDepartmentRequired ? t('invite.select_department') : t('默认根部门')" />
           </n-form-item>
         </n-grid-item>
         <n-grid-item>
@@ -313,11 +319,8 @@
           </n-form-item>
         </n-grid-item>
       </n-grid>
-      <n-form-item :label="t('岗位角色')" required>
-        <n-select v-model:value="inviteForm.primaryRoleId" :options="roleOptions" @update:value="syncInvitePrimaryRole" />
-      </n-form-item>
-      <n-form-item :label="t('其他岗位角色')">
-        <n-select v-model:value="inviteForm.roleIds" multiple max-tag-count="responsive" :options="roleOptions" />
+      <n-form-item :label="t('岗位角色')" :required="inviteRoleRequired">
+        <n-select v-model:value="inviteForm.primaryRoleId" :options="roleOptions" />
       </n-form-item>
       <n-alert v-if="inviteCapabilityPreview" type="info" :bordered="false" style="margin-bottom: 18px">
         {{ t('接受邀请后可用：') }}{{ inviteCapabilityPreview }}
@@ -376,11 +379,15 @@
       </n-space>
     </template>
   </n-modal>
+  <InviteHistoryPanel :open="inviteHistoryVisible" :refresh-key="inviteHistoryRefreshKey" :role-names="inviteRoleNames" :departments="inviteHistoryDepartments" @close="inviteHistoryVisible = false" />
 </template>
 
 <script setup lang="ts">
 import type { DataTableColumns, SelectOption, TreeOption } from 'naive-ui';
-import { NTag, useDialog, useMessage } from 'naive-ui';
+import { NIcon, NTag, useDialog, useMessage } from 'naive-ui';
+import TimeOutline from '@vicons/ionicons5/es/TimeOutline';
+import MenuFoldOutlined from '@vicons/antd/es/MenuFoldOutlined';
+import MenuUnfoldOutlined from '@vicons/antd/es/MenuUnfoldOutlined';
 import { computed, h, onMounted, ref, watch } from 'vue';
 import { t } from '@/composables/i18n';
 import { formatAdminDateTime } from '@/composables/adminTimezone';
@@ -411,12 +418,14 @@ import {
 } from '@/api/directory';
 import { listPositionRoles, type PositionRole } from '@/api/positionRoles';
 import BulkPositionRoleDialog from './BulkPositionRoleDialog.vue';
+import InviteHistoryPanel from './InviteHistoryPanel.vue';
 import EmployeeCredentialsFields from '@/components/directory/EmployeeCredentialsFields.vue';
 
 const message = useMessage();
 const dialog = useDialog();
 const saving = ref(false);
 const bulkRoleDialogVisible = ref(false);
+const departmentCollapsed = ref(false);
 const selectedUserIds = ref<string[]>([]);
 
 async function handleBulkRolesSaved() {
@@ -428,6 +437,9 @@ const departments = ref<DepartmentNode[]>([]);
 const users = ref<DirectoryUserItem[]>([]);
 const fieldDefs = ref<UserFieldDef[]>([]);
 const positionRoles = ref<PositionRole[]>([]);
+const inviteHistoryRefreshKey = ref(0);
+const inviteHistoryVisible = ref(false);
+const inviteRoleNames = computed(() => Object.fromEntries(positionRoles.value.map(role => [role.id, role.name])));
 const roleOptions = computed<SelectOption[]>(() => positionRoles.value.filter(role => role.status === 'active').map(role => ({ label: role.name, value: role.id })));
 const capabilityNames: Record<string, string> = {
   content_generation: '内容生成',
@@ -461,7 +473,11 @@ const treeOptions = computed<TreeOption[]>(() => toTreeOptions(departments.value
 
 const selectedDeptId = computed(() => selectedDeptKeys.value[0] || '');
 const departmentOptions = computed<SelectOption[]>(() => flattenDepartmentOptions(departments.value, true));
+const inviteDepartmentOptions = computed<SelectOption[]>(() => flattenDepartmentOptions(departments.value, false));
+const inviteDepartmentRequired = computed(() => inviteDepartmentOptions.value.length > 0);
+const inviteRoleRequired = computed(() => roleOptions.value.length > 0);
 const departmentOptionsWithRoot = computed<SelectOption[]>(() => flattenDepartmentOptions(departments.value, true));
+const inviteHistoryDepartments = computed(() => departmentOptionsWithRoot.value.map(option => ({ label: String(option.label), value: String(option.value) })));
 const moveDepartmentOptions = computed<SelectOption[]>(() => flattenDepartmentOptions(departments.value, true, selectedMoveBlockedDeptIds.value));
 const selectedMoveBlockedDeptIds = computed(() => {
   if (!selectedDeptId.value) return new Set<string>();
@@ -600,8 +616,8 @@ const columns = computed<DataTableColumns<DirectoryUserItem>>(() => {
   return [
     { type: 'selection', fixed: 'left', width: 44 },
     { title: t('姓名'), key: 'name', width: 120, fixed: 'left' },
-    { title: t('登录名'), key: 'loginName', width: 140, fixed: 'left' },
-    { title: t('手机号'), key: 'mobile', width: 140, fixed: 'left' },
+    { title: t('登录名'), key: 'loginName', width: 140 },
+    { title: t('手机号'), key: 'mobile', width: 140 },
     { title: t('邮箱'), key: 'email', width: 180 },
     { title: t('主部门'), key: 'primaryDepartmentName', width: 180 },
     {
@@ -632,7 +648,8 @@ const columns = computed<DataTableColumns<DirectoryUserItem>>(() => {
     {
       title: t('操作'),
       key: 'actions',
-      width: 280,
+      width: 240,
+      fixed: 'right',
       render: (row) =>
         h('div', { class: 'action-row' }, [
           h(
@@ -672,7 +689,9 @@ const columns = computed<DataTableColumns<DirectoryUserItem>>(() => {
     },
   ];
 });
-const userTableScrollX = computed(() => 1410 + fieldDefs.value.filter((field) => field.enabled).length * 140);
+const userTableScrollX = computed(() => 1634 + fieldDefs.value
+  .filter((field) => field.enabled)
+  .reduce((width, field) => width + (field.masked ? 170 : 140), 0));
 
 const fieldColumns = computed<DataTableColumns<UserFieldDef>>(() => [
   { title: t('字段Key'), key: 'fieldKey' },
@@ -934,10 +953,9 @@ const inviteForm = ref({
   defaultDepartmentId: null as string | null,
   expiresHours: 72,
   primaryRoleId: '',
-  roleIds: [] as string[],
 });
 const inviteCapabilityPreview = computed(() => {
-  const selected = positionRoles.value.filter(role => inviteForm.value.roleIds.includes(role.id));
+  const selected = positionRoles.value.filter(role => role.id === inviteForm.value.primaryRoleId);
   const capabilitySet = new Set<string>();
   selected.forEach(role => Object.entries(role.capabilities).forEach(([key, enabled]) => {
     if (enabled) capabilitySet.add(capabilityNames[key] ? t(capabilityNames[key]) : key);
@@ -950,9 +968,6 @@ function syncPrimaryRole(roleId: string) {
   userForm.value.roleIds = Array.from(new Set([roleId, ...userForm.value.roleIds.filter(Boolean)]));
 }
 
-function syncInvitePrimaryRole(roleId: string) {
-  inviteForm.value.roleIds = Array.from(new Set([roleId, ...inviteForm.value.roleIds.filter(Boolean)]));
-}
 const inviteResult = ref<UserInviteLinkResult>({
   inviteUrl: '',
   token: '',
@@ -1202,12 +1217,10 @@ async function saveUser() {
 
 function openInviteUser() {
   inviteForm.value = {
-    defaultDepartmentId: selectedDeptId.value || null,
+    defaultDepartmentId: inviteDepartmentOptions.value.some(option => option.value === selectedDeptId.value) ? selectedDeptId.value : null,
     expiresHours: 72,
     primaryRoleId: positionRoles.value.find(role => !role.protected && role.status === 'active')?.id || positionRoles.value.find(role => role.status === 'active')?.id || '',
-    roleIds: [],
   };
-  syncInvitePrimaryRole(inviteForm.value.primaryRoleId);
   inviteResult.value = {
     inviteUrl: '',
     token: '',
@@ -1218,20 +1231,23 @@ function openInviteUser() {
 }
 
 async function generateInviteLink() {
-  if (!inviteForm.value.primaryRoleId) {
+  if (inviteDepartmentRequired.value && !inviteForm.value.defaultDepartmentId) {
+    message.warning(t('invite.select_department'));
+    return;
+  }
+  if (inviteRoleRequired.value && !inviteForm.value.primaryRoleId) {
     message.warning(t('请选择岗位角色'));
     return;
   }
-  syncInvitePrimaryRole(inviteForm.value.primaryRoleId);
   saving.value = true;
   try {
     const result = await createOrgInviteLink({
       defaultDepartmentId: inviteForm.value.defaultDepartmentId,
       expiresHours: inviteForm.value.expiresHours,
       primaryRoleId: inviteForm.value.primaryRoleId,
-      roleIds: inviteForm.value.roleIds,
     });
     inviteResult.value = result;
+    inviteHistoryRefreshKey.value += 1;
     message.success(t('邀请链接已生成'));
   } catch (error) {
     message.error(parseError(error));
@@ -1503,6 +1519,7 @@ onMounted(async () => {
   height: 100%;
   min-width: 0;
   overflow: hidden;
+  padding: 12px;
 }
 
 .user-layout {
@@ -1514,6 +1531,8 @@ onMounted(async () => {
   max-width: 100%;
   overflow: hidden;
 }
+
+.user-layout-collapsed { grid-template-columns: minmax(0, 1fr); }
 
 .dept-panel {
   border: 1px solid #eceff5;
@@ -1605,6 +1624,9 @@ onMounted(async () => {
   margin-bottom: 10px;
   min-width: 0;
 }
+
+.toolbar-leading { display:flex; align-items:center; flex-wrap:wrap; gap:10px; min-width:0; }
+.department-toggle { flex:none; width:28px; height:28px; color:#52627a; }
 
 .toolbar :deep(.n-space) {
   flex-wrap: wrap;
@@ -1746,5 +1768,12 @@ onMounted(async () => {
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+:deep(.department-toggle svg) {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  stroke: none;
 }
 </style>

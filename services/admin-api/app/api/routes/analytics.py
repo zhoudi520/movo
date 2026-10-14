@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 
 from bson import ObjectId
@@ -17,6 +18,8 @@ from app.services.token_usage_analytics_helpers import (
 )
 from app.services.token_usage_chat_history import load_visible_turn
 from app.services.token_usage_status import REQUEST_STATUS_VALUES, normalize_request_status
+from app.services.model_pricing import calculate_cost, load_model_prices, serialize_costs
+from app.services.directory_scope import department_user_ids
 
 router = APIRouter()
 
@@ -71,6 +74,7 @@ async def list_token_usage(
     current_user: dict[str, Any] = Depends(get_current_admin_user),
     mainId: str = Query(default=""),
     departmentId: str = Query(default=""),
+    userId: str = Query(default=""),
     modelName: str = Query(default=""),
     stage: str = Query(default=""),
     statusText: str = Query(default="", alias="status"),
@@ -92,6 +96,8 @@ async def list_token_usage(
     match: dict[str, Any] = dict(scope_match)
     if modelName.strip():
         match["model_name"] = modelName.strip()
+    if userId.strip():
+        match["user_id"] = userId.strip()
     if stage.strip():
         match["stage"] = stage.strip()
     requested_status = statusText.strip()
@@ -105,31 +111,8 @@ async def list_token_usage(
 
     department_id = departmentId.strip()
     if department_id:
-        rel_match: dict[str, Any] = {"org_id": department_id}
-        if resolved_main_id:
-            rel_match["main_id"] = resolved_main_id
-        elif scope_match.get("main_id"):
-            rel_match["main_id"] = scope_match["main_id"]
-
-        rel_rows = await user_org_rel_coll.find(rel_match, {"user_id": 1}).to_list(length=50000)
-        allowed_user_ids = [str(row.get("user_id") or "") for row in rel_rows if str(row.get("user_id") or "").strip()]
-        if not allowed_user_ids:
-            return {
-                "summary": _summary_defaults(),
-                "items": [],
-                "offset": offset,
-                "limit": limit,
-                "total": 0,
-                "hasMore": False,
-                "filterOptions": {
-                    "enterprises": [],
-                    "departments": [],
-                    "models": [],
-                    "stages": [],
-                    "statuses": [],
-                },
-            }
-        match["user_id"] = {"$in": allowed_user_ids}
+        allowed_user_ids = await department_user_ids(db, resolved_main_id, department_id)
+        match["user_id"] = {"$in": [userId.strip()] if userId.strip() in allowed_user_ids else []} if userId.strip() else {"$in": allowed_user_ids}
 
     keyword = q.strip()
     if keyword:
@@ -187,6 +170,7 @@ async def list_token_usage(
                 "failed_count": {"$sum": {"$cond": [{"$eq": ["$status", "failed"]}, 1, 0]}},
                 "error_text": {"$first": {"$ifNull": ["$response_payload.error", "$push_error"]}},
                 "model_name": {"$first": "$model_name"},
+                "usage_parts": {"$push": {"model_id": "$model_id", "model_name": "$model_name", "prompt_tokens": "$prompt_tokens", "completion_tokens": "$completion_tokens"}},
                 "request_title_zh": {"$first": "$request_title_zh"},
                 "request_title_en": {"$first": "$request_title_en"},
                 "prompt": {"$first": "$prompt"},
@@ -217,12 +201,7 @@ async def list_token_usage(
         rows = filtered_rows[offset : offset + limit]
     else:
         total = int(await usage_coll.count_documents(match))
-        cursor = (
-            usage_coll.find(match)
-            .sort([("end_time", -1), ("created_at", -1)])
-            .skip(offset)
-            .limit(limit)
-        )
+        cursor = usage_coll.find(match).sort([("end_time", -1), ("created_at", -1)]).skip(offset).limit(limit)
         rows = await cursor.to_list(length=limit)
         for row in rows:
             row["calls"] = 1
@@ -311,35 +290,26 @@ async def list_token_usage(
             }
         )
 
-    MODEL_PRICES = {
-        "deepseek-v4-flash": (0.5, 1.5),
-        "gpt-5.2-chat": (35.0, 110.0),
-        "gpt-5.2": (35.0, 110.0),
-        "gpt-5.4": (100.0, 300.0),
-        "qwen3-vl-plus": (10.0, 10.0),
-    }
-    DEFAULT_PRICE = (10.0, 30.0)
-
+    prices = await load_model_prices(db, resolved_main_id)
     total_calls = 0
     total_tokens = 0
     prompt_tokens = 0
     completion_tokens = 0
-    total_cost = 0.0
+    costs = {"CNY": Decimal(0), "USD": Decimal(0)}
+    recent_costs = {"CNY": Decimal(0), "USD": Decimal(0)}
+    priced_calls = {"CNY": 0, "USD": 0}
+    unpriced_calls = 0
     last_called_at = None
     all_active_users = set()
     all_active_user_requests = set()
     recent_calls = 0
     recent_tokens = 0
-    recent_cost = 0.0
     now = datetime.now(timezone.utc)
     recent_threshold = now - timedelta(days=1)
 
     for row in filtered_rows:
-        model_name = str(row.get("model_name") or "").strip()
-        in_price, out_price = MODEL_PRICES.get(model_name, DEFAULT_PRICE)
         row_prompt = int(row.get("prompt_tokens") or 0)
         row_comp = int(row.get("completion_tokens") or 0)
-        row_cost = (row_prompt * in_price + row_comp * out_price) / 1000000.0
         row_total = int(row.get("total_tokens") or 0)
         row_calls = int(row.get("calls") or 1)
 
@@ -347,7 +317,16 @@ async def list_token_usage(
         total_tokens += row_total
         prompt_tokens += row_prompt
         completion_tokens += row_comp
-        total_cost += row_cost
+        for part in row.get("usage_parts") or [row]:
+            price_result = calculate_cost(part, prices)
+            if price_result is None:
+                unpriced_calls += 1
+                continue
+            currency, amount = price_result
+            costs[currency] += amount
+            priced_calls[currency] += 1
+            if _normalize_utc_datetime(row.get("created_at")) and _normalize_utc_datetime(row.get("created_at")) >= recent_threshold:
+                recent_costs[currency] += amount
 
         row_last = _normalize_utc_datetime(row.get("created_at"))
         if row_last:
@@ -363,7 +342,6 @@ async def list_token_usage(
         if isinstance(row_last, datetime) and row_last >= recent_threshold:
             recent_calls += row_calls
             recent_tokens += row_total
-            recent_cost += row_cost
 
     active_user_ids = list(all_active_users)
     active_dept_count = 0
@@ -376,10 +354,8 @@ async def list_token_usage(
 
     request_count = len(all_active_user_requests)
     avg_tokens = 0.0
-    avg_cost = 0.0
     if request_count > 0:
         avg_tokens = float(total_tokens) / request_count
-        avg_cost = total_cost / request_count
 
     summary = {
         "totalCalls": total_calls,
@@ -392,9 +368,11 @@ async def list_token_usage(
         "last24hTokens": recent_tokens,
         "activeUsers": len(active_user_ids),
         "activeDepartments": int(active_dept_count),
-        "totalCost": round(total_cost, 4),
-        "avgCost": round(avg_cost, 4),
-        "last24hCost": round(recent_cost, 4),
+        "costsByCurrency": serialize_costs(costs),
+        "pricedCallsByCurrency": priced_calls,
+        "avgCostsByCurrency": serialize_costs({key: value / request_count if request_count else Decimal(0) for key, value in costs.items()}),
+        "last24hCostsByCurrency": serialize_costs(recent_costs),
+        "unpricedCalls": unpriced_calls,
     }
 
     enterprise_scope_match = dict(scope_match)
@@ -405,12 +383,6 @@ async def list_token_usage(
     models = sorted([str(item or "") for item in await usage_coll.distinct("model_name", model_scope_match) if str(item or "").strip()])[:200]
     statuses = ["completed", "user_cancelled", "runtime_error", "network_error"]
 
-    department_options: list[dict[str, str]] = []
-    if resolved_main_id:
-        dept_cursor = dept_coll.find({"main_id": resolved_main_id}, {"name": 1}).sort("created_at", 1)
-        dept_rows = await dept_cursor.to_list(length=5000)
-        department_options = [{"label": str(row.get("name") or ""), "value": str(row.get("_id"))} for row in dept_rows if str(row.get("name") or "").strip()]
-
     return {
         "summary": summary,
         "items": items,
@@ -420,7 +392,8 @@ async def list_token_usage(
         "hasMore": offset + len(items) < total,
         "filterOptions": {
             "enterprises": [{"label": item, "value": item} for item in enterprises],
-            "departments": department_options,
+            "departments": [],
+            "users": [],
             "models": [{"label": item, "value": item} for item in models],
             "stages": [],
             "statuses": [{"label": item, "value": item} for item in statuses],

@@ -62,7 +62,8 @@
               </template>
               {{ t('刷新') }}
             </n-button>
-            <n-button type="primary" strong @click="openCreate">
+            <n-button secondary @click="openGroupCreate">{{ t('modelGroup.create') }}</n-button>
+            <n-button type="primary" strong @click="openCreate()">
               <template #icon>
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M5 12h14" />
@@ -77,9 +78,19 @@
 
       <div class="list-body">
         <n-spin :show="loading">
-          <div v-if="filteredInstances.length" class="model-grid">
+          <div v-if="filteredInstances.length || filteredGroups.length" class="model-grid">
+            <ModelGroupCard
+              v-for="group in filteredGroups"
+              :key="group.id"
+              :group="group"
+              :models="instances.filter((item) => item.groupId === group.id)"
+              :providers="providers"
+              @edit="openGroupEdit(group)"
+              @add="openGroupEdit(group)"
+              @edit-model="openGroupModelEdit"
+            />
             <button
-              v-for="model in filteredInstances"
+              v-for="model in filteredStandaloneInstances"
               :key="model.id"
               class="model-config-card"
               type="button"
@@ -123,7 +134,7 @@
               </div>
             </button>
 
-            <button class="model-config-card add-model-card" type="button" @click="openCreate">
+            <button class="model-config-card add-model-card" type="button" @click="openCreate()">
               <div class="add-symbol">+</div>
               <div class="add-title">{{ t('新增模型') }}</div>
               <div class="add-copy">{{ t('配置 OpenAI、Azure OpenAI、通义千问、DeepSeek 或自定义兼容接口。') }}</div>
@@ -132,19 +143,29 @@
 
           <n-empty v-else :description="t('暂无模型配置')">
             <template #extra>
-              <n-button type="primary" @click="openCreate">{{ t('新增第一个模型') }}</n-button>
+              <n-button type="primary" @click="openCreate()">{{ t('新增第一个模型') }}</n-button>
             </template>
           </n-empty>
         </n-spin>
       </div>
     </n-card>
+    <ModelGroupEditor
+      v-model:show="groupEditorVisible"
+      :group="editingGroup"
+      :providers="providers"
+      :models="instances"
+      :selected-model-id="selectedGroupModelId"
+      @saved="onGroupSaved"
+      @deleted="reload"
+      @member-changed="reload"
+    />
   </div>
 
   <n-modal v-model:show="editorVisible" preset="card" :title="editorTitle" style="width: 980px">
     <div class="editor-layout" :class="{ 'single-column': editorMode === 'create' }">
       <n-form class="editor-form" :model="form" label-placement="left" label-width="96">
         <n-grid :cols="2" :x-gap="14">
-          <n-grid-item>
+          <n-grid-item v-if="!form.groupId">
             <n-form-item :label="t('供应商')">
               <n-select
                 v-model:value="form.providerId"
@@ -168,17 +189,17 @@
               <n-select v-model:value="form.status" :options="statusOptions" />
             </n-form-item>
           </n-grid-item>
-          <n-grid-item :span="2">
+          <n-grid-item v-if="!form.groupId" :span="2">
             <n-form-item label="Base URL">
               <n-input v-model:value="form.baseUrl" :placeholder="baseUrlPlaceholder" />
             </n-form-item>
           </n-grid-item>
-          <n-grid-item v-if="isAzureProvider">
+          <n-grid-item v-if="isAzureProvider && !form.groupId">
             <n-form-item label="API Version">
               <n-input v-model:value="form.apiVersion" placeholder="如: 2024-10-21" />
             </n-form-item>
           </n-grid-item>
-          <n-grid-item>
+          <n-grid-item v-if="!form.groupId">
             <n-form-item label="API Key">
               <n-input
                 v-model:value="form.apiKey"
@@ -193,6 +214,10 @@
               <n-select v-model:value="form.capabilities" multiple :options="capabilityOptions" />
             </n-form-item>
           </n-grid-item>
+          <n-grid-item v-if="form.groupId" :span="2">
+            <n-alert type="info" :bordered="false">{{ t('modelGroup.sharedConnection', { name: groups.find((item) => item.id === form.groupId)?.name || '' }) }}</n-alert>
+          </n-grid-item>
+          <n-grid-item :span="2"><ModelPricingFields v-model="form.pricing" /></n-grid-item>
           <n-grid-item v-if="hasImageCapability" :span="2">
             <ImageModelRuntimeFields
               v-model:runtimeKind="form.runtimeKind"
@@ -205,6 +230,7 @@
           v-if="modelAccess.enabled && isUserSelectableModel"
           v-model="modelAccessValue"
           :loading="modelAccessLoading"
+          :grouped="Boolean(form.groupId)"
           class="model-access-panel"
         />
       </n-form>
@@ -276,13 +302,17 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import axios from 'axios';
-import { useDialog, useMessage } from 'naive-ui';
+import { NAlert, useDialog, useMessage } from 'naive-ui';
 import PageIntro from '@/components/PageIntro.vue';
 import { t } from '@/composables/i18n';
 import { formatAdminDateTime } from '@/composables/adminTimezone';
 import ImageModelRuntimeFields from '@/components/models/ImageModelRuntimeFields.vue';
+import ModelPricingFields from '@/components/models/ModelPricingFields.vue';
+import ModelGroupCard from '@/components/models/ModelGroupCard.vue';
+import ModelGroupEditor from '@/components/models/ModelGroupEditor.vue';
 import {
   createModelInstance,
+  fetchModelGroups,
   deleteModelInstance,
   fetchModelInstances,
   fetchModelProviders,
@@ -291,11 +321,13 @@ import {
   testKnowledgeModelInstance,
   updateModelInstance,
   type ModelInstanceItem,
+  type ModelGroupItem,
   type ModelInstancePayload,
   type ModelProviderItem,
   type ModelStatus,
   type ImageModelSettings,
   type ImageRuntimeKind,
+  type ModelPricing,
 } from '@/api/models';
 import { fetchTrafficAllocationOverview } from '@/api/traffic-allocations';
 import { capabilityLabel } from '@/components/models/capabilityLabels';
@@ -310,6 +342,7 @@ interface ModelForm extends ModelInstancePayload {
   apiKeyMasked: string;
   runtimeKind: ImageRuntimeKind | '';
   imageSettings: ImageModelSettings;
+  pricing: ModelPricing | null;
 }
 
 const loading = ref(false);
@@ -320,6 +353,10 @@ const dialog = useDialog();
 const router = useRouter();
 const providers = ref<ModelProviderItem[]>([]);
 const instances = ref<ModelInstanceItem[]>([]);
+const groups = ref<ModelGroupItem[]>([]);
+const groupEditorVisible = ref(false);
+const editingGroup = ref<ModelGroupItem | null>(null);
+const selectedGroupModelId = ref('');
 const editorVisible = ref(false);
 const editorMode = ref<'create' | 'edit'>('create');
 const suppressProviderChange = ref(false);
@@ -339,6 +376,7 @@ const filters = ref({
 
 const defaultForm = (): ModelForm => ({
   id: '',
+  groupId: '',
   providerId: '',
   orgId: '',
   displayName: '',
@@ -350,6 +388,7 @@ const defaultForm = (): ModelForm => ({
   capabilities: ['chat'],
   runtimeKind: '',
   imageSettings: {},
+  pricing: null,
   status: 'active',
   isDefault: false,
 });
@@ -434,6 +473,31 @@ const filteredInstances = computed(() => {
     return hitKeyword && hitProvider && hitStatus;
   });
 });
+const filteredStandaloneInstances = computed(() => filteredInstances.value.filter((item) => !item.groupId));
+const filteredGroups = computed(() => {
+  const keyword = filters.value.keyword.trim().toLowerCase();
+  return groups.value.filter((group) => {
+    const children = filteredInstances.value.filter((item) => item.groupId === group.id);
+    const groupMatches = (!keyword || [group.name, group.baseUrl].some((value) => value.toLowerCase().includes(keyword)))
+      && (!filters.value.providerId || group.providerId === filters.value.providerId)
+      && (!filters.value.status || group.status === filters.value.status);
+    return groupMatches || children.length > 0;
+  });
+});
+
+function openGroupCreate() { selectedGroupModelId.value = ''; editingGroup.value = null; groupEditorVisible.value = true; }
+function openGroupEdit(group: ModelGroupItem) { selectedGroupModelId.value = ''; editingGroup.value = group; groupEditorVisible.value = true; }
+function openGroupModelEdit(model: ModelInstanceItem) {
+  const group = groups.value.find((item) => item.id === model.groupId);
+  if (!group) return;
+  selectedGroupModelId.value = model.id;
+  editingGroup.value = group;
+  groupEditorVisible.value = true;
+}
+async function onGroupSaved(group: ModelGroupItem) {
+  editingGroup.value = group;
+  await reload();
+}
 
 function providerInitial(name: string) {
   return (name || 'M').slice(0, 1).toUpperCase();
@@ -495,18 +559,20 @@ function suppressNextProviderChangeTick() {
   });
 }
 
-function openCreate() {
+function openCreate(group?: ModelGroupItem) {
   editorMode.value = 'create';
   suppressNextProviderChangeTick();
   form.value = defaultForm();
-  const firstProvider = providers.value.find((item) => item.status === 'active');
+  const firstProvider = group ? providerMap.value.get(group.providerId) : providers.value.find((item) => item.status === 'active');
   if (firstProvider) {
+    form.value.groupId = group?.id || '';
     form.value.providerId = firstProvider.id;
-    form.value.baseUrl = firstProvider.defaultBaseUrl;
-    form.value.displayName = defaultProviderDisplayName(firstProvider);
+    form.value.baseUrl = group?.baseUrl || firstProvider.defaultBaseUrl;
+    form.value.apiVersion = group?.apiVersion || '';
+    form.value.displayName = group ? '' : defaultProviderDisplayName(firstProvider);
   }
   resetTestState(t('新增配置保存后可测试。'));
-  modelAccess.reset();
+  modelAccess.reset(Boolean(group));
   editorVisible.value = true;
 }
 
@@ -515,6 +581,7 @@ function openEdit(row: ModelInstanceItem) {
   suppressNextProviderChangeTick();
   form.value = {
     id: row.id,
+    groupId: row.groupId || '',
     providerId: row.providerId,
     orgId: row.orgId,
     displayName: row.displayName,
@@ -526,6 +593,7 @@ function openEdit(row: ModelInstanceItem) {
     capabilities: [...row.capabilities],
     runtimeKind: row.runtimeKind || recommendedImageRuntime(providerMap.value.get(row.providerId)),
     imageSettings: { ...(row.imageSettings || {}) },
+    pricing: row.pricing ? { ...row.pricing } : null,
     status: row.status,
     isDefault: false,
   };
@@ -544,11 +612,11 @@ async function saveModel() {
     message.warning(t(accessValidation));
     return;
   }
-  if (!form.value.providerId || !form.value.displayName.trim() || !form.value.modelName.trim()) {
+  if (!form.value.providerId || (!form.value.groupId && !form.value.displayName.trim()) || !form.value.modelName.trim()) {
     message.warning(t('请补齐供应商、显示名称和模型 ID'));
     return;
   }
-  if (editorMode.value === 'create' && !form.value.apiKey.trim()) {
+  if (editorMode.value === 'create' && !form.value.groupId && !form.value.apiKey.trim()) {
     message.warning(t('新增模型需要填写 API Key'));
     return;
   }
@@ -570,8 +638,9 @@ async function saveModel() {
     const isCreatingFirstModel = editorMode.value === 'create' && instances.value.length === 0;
     const payload: ModelInstancePayload = {
       providerId: form.value.providerId,
+      groupId: form.value.groupId,
       orgId: form.value.orgId,
-      displayName: form.value.displayName.trim(),
+      displayName: form.value.displayName.trim() || form.value.modelName.trim(),
       modelName: form.value.modelName.trim(),
       baseUrl: form.value.baseUrl.trim(),
       apiVersion: form.value.apiVersion.trim(),
@@ -579,6 +648,7 @@ async function saveModel() {
       capabilities: form.value.capabilities.length ? form.value.capabilities : ['chat'],
       runtimeKind: hasImageCapability.value ? form.value.runtimeKind || recommendedImageRuntime(currentProvider.value) : '',
       imageSettings: hasImageCapability.value ? { ...form.value.imageSettings } : {},
+      pricing: form.value.pricing,
       maxContextTokens: 0,
       status: form.value.status,
       isDefault: false,
@@ -728,13 +798,15 @@ function confirmDeleteFromEditor() {
 async function reload() {
   loading.value = true;
   try {
-    const [providerRows, instanceRows, allocationOverview] = await Promise.all([
+    const [providerRows, instanceRows, groupRows, allocationOverview] = await Promise.all([
       fetchModelProviders(),
       fetchModelInstances(),
+      fetchModelGroups(),
       fetchTrafficAllocationOverview().catch(() => null),
     ]);
     providers.value = providerRows;
     instances.value = instanceRows;
+    groups.value = groupRows;
     if (allocationOverview) {
       orgQuota.value = allocationOverview.orgPolicy.totalTokens;
     }

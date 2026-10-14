@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import adminProductUiExtension from '@movo-admin-product-extension'
 
-defineProps<{ modelValue: unknown; loading: boolean }>()
+defineProps<{ modelValue: unknown; loading: boolean; grouped?: boolean }>()
 const emit = defineEmits<{ (event: 'update:modelValue', value: unknown): void }>()
 
 const extension = adminProductUiExtension.modelAccess
@@ -12,6 +12,7 @@ const extension = adminProductUiExtension.modelAccess
     <component
       :is="extension.component"
       :model-value="modelValue"
+      :grouped="grouped"
       @update:model-value="emit('update:modelValue', $event)"
     />
   </n-spin>

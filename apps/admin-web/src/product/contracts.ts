@@ -9,7 +9,7 @@ export interface AdminProductMenuGroup {
 
 export interface ModelAccessUiExtension {
   component: Component
-  createValue: () => unknown
+  createValue: (grouped?: boolean) => unknown
   load: (modelId: string) => Promise<unknown>
   save: (modelId: string, value: unknown) => Promise<void>
   validate?: (value: unknown) => string | null
@@ -45,6 +45,7 @@ export interface AdminProductUiExtension {
   topicRuleAudience?: TopicRuleAudienceUiExtension
   topicRuleAudienceBadge?: Component
   modelAccess?: ModelAccessUiExtension
+  modelGroupAccess?: ModelAccessUiExtension
   skillAccess?: ResourceAccessUiExtension
   toolAccess?: ResourceAccessUiExtension
   pluginAccess?: ResourceAccessUiExtension

@@ -18,6 +18,7 @@ from app.llm.capabilities import infer_structured_output_mode
 from app.llm.instrumented_client import InstrumentedLLMClient
 from app.llm.providers.azure_openai import AzureOpenAIClient
 from app.llm.providers.default_openai import DefaultOpenAIClient
+from app.llm.model_group_config import active_group_ids, load_model_group
 
 PROVIDER_COLLECTION = "admin_model_providers"
 INSTANCE_COLLECTION = "admin_model_instances"
@@ -109,8 +110,12 @@ async def get_model_config_by_capability(
         raise ModelConfigError("模型配置 ID 无效") from exc
     if instance is None:
         return None
+    try:
+        group = await load_model_group(instance)
+    except ValueError as exc:
+        raise ModelConfigError(str(exc)) from exc
     provider = await db[PROVIDER_COLLECTION].find_one({"_id": instance.get("provider_id")})
-    return _to_runtime_config(instance, provider or {}, required_capability=capability)
+    return _to_runtime_config(instance, provider or {}, group=group, required_capability=capability)
 
 
 async def get_default_model_config(main_id: str) -> dict[str, Any] | None:
@@ -123,18 +128,23 @@ async def get_default_model_config_by_capability(
     capability: str = "chat",
 ) -> dict[str, Any] | None:
     db = get_db()
-    instance = await db[INSTANCE_COLLECTION].find_one(
+    cursor = db[INSTANCE_COLLECTION].find(
         {
             "main_id": main_id,
             "status": "active",
             "capabilities": _capability_query_value(capability),
         },
-        sort=[("priority", 1), ("updated_at", -1)],
-    )
-    if instance is None:
-        return None
-    provider = await db[PROVIDER_COLLECTION].find_one({"_id": instance.get("provider_id")})
-    return _to_runtime_config(instance, provider or {}, required_capability=capability)
+    ).sort([("priority", 1), ("updated_at", -1)])
+    async for instance in cursor:
+        try:
+            group = await load_model_group(instance)
+        except ValueError:
+            continue
+        if group is not None and group.get("status") != "active":
+            continue
+        provider = await db[PROVIDER_COLLECTION].find_one({"_id": instance.get("provider_id")})
+        return _to_runtime_config(instance, provider or {}, group=group, required_capability=capability)
+    return None
 
 
 async def list_chat_model_options(main_id: str) -> list[dict[str, Any]]:
@@ -155,6 +165,9 @@ async def list_model_options(
         }
     ).sort([("priority", 1), ("updated_at", -1)])
     instances = await cursor.to_list(length=200)
+    group_ids = [str(item.get("group_id")) for item in instances if item.get("group_id")]
+    active_groups = await active_group_ids(main_id, group_ids)
+    instances = [item for item in instances if not item.get("group_id") or str(item["group_id"]) in active_groups]
     provider_ids = [item.get("provider_id") for item in instances if item.get("provider_id")]
     provider_map: dict[str, dict[str, Any]] = {}
     if provider_ids:
@@ -196,10 +209,14 @@ def _to_runtime_config(
     instance: dict[str, Any],
     provider: dict[str, Any],
     *,
+    group: dict[str, Any] | None = None,
     required_capability: str | None = "chat",
 ) -> dict[str, Any]:
     provider_type = str(provider.get("provider_type") or "openai_compatible").strip()
-    api_key = decrypt_secret(str(instance.get("api_key_encrypted") or ""))
+    if group is not None and group.get("status") != "active":
+        raise ModelConfigError("模型组已禁用")
+    connection = group if group is not None else instance
+    api_key = decrypt_secret(str(connection.get("api_key_encrypted") or ""))
     settings = instance.get("settings")
     if not isinstance(settings, dict):
         settings = provider.get("settings") if isinstance(provider.get("settings"), dict) else {}
@@ -211,8 +228,8 @@ def _to_runtime_config(
         "provider_name": str(provider.get("name") or ""),
         "provider_code": str(provider.get("code") or ""),
         "model_name": str(instance.get("model_name") or "").strip(),
-        "base_url": str(instance.get("base_url") or provider.get("default_base_url") or "").strip(),
-        "api_version": str(instance.get("api_version") or "").strip(),
+        "base_url": str(connection.get("base_url") or provider.get("default_base_url") or "").strip(),
+        "api_version": str(connection.get("api_version") or "").strip(),
         "api_key": api_key,
         "status": str(instance.get("status") or ""),
         "capabilities": _normalize_capabilities(instance.get("capabilities")),

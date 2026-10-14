@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 
 from bson import ObjectId
@@ -11,6 +12,7 @@ from app.core.db import get_db
 from app.core.product_edition import billing_enabled, is_community_organization, member_limit
 from app.repositories.directory_repository import DEPARTMENT_COLLECTION, USER_COLLECTION, USER_ORG_REL_COLLECTION
 from app.repositories.model_repository import INSTANCE_COLLECTION
+from app.services.model_pricing import calculate_cost, load_model_prices, serialize_costs
 
 router = APIRouter()
 
@@ -18,15 +20,6 @@ SKILL_COLLECTION = "skills"
 TOOL_COLLECTION = "external_tools"
 ORG_COLLECTION = "organizations"
 TOKEN_USAGE_COLLECTION = "token_usage_logs"
-
-MODEL_PRICES = {
-    "deepseek-v4-flash": (0.5, 1.5),
-    "gpt-5.2-chat": (35.0, 110.0),
-    "gpt-5.2": (35.0, 110.0),
-    "gpt-5.4": (100.0, 300.0),
-    "qwen3-vl-plus": (10.0, 10.0),
-}
-DEFAULT_PRICE = (10.0, 30.0)
 
 
 def _fmt_time(value: Any) -> str | None:
@@ -42,11 +35,6 @@ def _duration_ms(row: dict[str, Any]) -> int:
     start_time = int(row.get("start_time") or 0)
     end_time = int(row.get("end_time") or 0)
     return max(0, end_time - start_time) if start_time and end_time else 0
-
-
-def _cost(model_name: str, prompt_tokens: int, completion_tokens: int) -> float:
-    in_price, out_price = MODEL_PRICES.get(str(model_name or "").strip(), DEFAULT_PRICE)
-    return (prompt_tokens * in_price + completion_tokens * out_price) / 1_000_000.0
 
 
 async def _billing(db: Any, main_id: str, current_user: dict[str, Any]) -> dict[str, Any]:
@@ -88,7 +76,7 @@ async def _usage_metrics(db: Any, main_id: str) -> tuple[dict[str, Any], list[di
             {"$match": match},
             {
                 "$group": {
-                    "_id": "$model_name",
+                    "_id": {"model_id": "$model_id", "model_name": "$model_name"},
                     "calls": {"$sum": 1},
                     "failed_calls": {"$sum": {"$cond": [{"$eq": ["$status", "failed"]}, 1, 0]}},
                     "total_tokens": {"$sum": {"$ifNull": ["$total_tokens", 0]}},
@@ -126,20 +114,29 @@ async def _usage_metrics(db: Any, main_id: str) -> tuple[dict[str, Any], list[di
     total_calls = 0
     failed_calls = 0
     total_tokens = 0
-    total_cost = 0.0
+    prices = await load_model_prices(db, main_id)
+    costs = {"CNY": Decimal(0), "USD": Decimal(0)}
+    priced_calls = {"CNY": 0, "USD": 0}
+    unpriced_calls = 0
     active_users: set[str] = set()
     last_called_at: datetime | None = None
     duration_sum = 0
     timed_calls = 0
 
     for row in rows:
-        model_name = str(row.get("_id") or "")
+        model_identity = row.get("_id") or {}
         row_prompt = int(row.get("prompt_tokens") or 0)
         row_completion = int(row.get("completion_tokens") or 0)
         total_calls += int(row.get("calls") or 0)
         failed_calls += int(row.get("failed_calls") or 0)
         total_tokens += int(row.get("total_tokens") or 0)
-        total_cost += _cost(model_name, row_prompt, row_completion)
+        price_result = calculate_cost({"model_id": model_identity.get("model_id"), "model_name": model_identity.get("model_name"), "prompt_tokens": row_prompt, "completion_tokens": row_completion}, prices)
+        if price_result is None:
+            unpriced_calls += int(row.get("calls") or 0)
+        else:
+            currency, amount = price_result
+            costs[currency] += amount
+            priced_calls[currency] += int(row.get("calls") or 0)
         duration_sum += int(row.get("duration_sum") or 0)
         timed_calls += int(row.get("timed_calls") or 0)
         for user_id in row.get("active_users") or []:
@@ -167,7 +164,9 @@ async def _usage_metrics(db: Any, main_id: str) -> tuple[dict[str, Any], list[di
         {
             "calls24h": total_calls,
             "tokens24h": total_tokens,
-            "cost24h": round(total_cost, 4),
+            "costs24hByCurrency": serialize_costs(costs),
+            "pricedCalls24hByCurrency": priced_calls,
+            "unpricedCalls24h": unpriced_calls,
             "activeUsers24h": len(active_users),
             "activeDepartments24h": active_dept_count,
             "failedCalls24h": failed_calls,

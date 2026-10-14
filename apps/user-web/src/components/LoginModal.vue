@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import PasswordLoginForm from './login/PasswordLoginForm.vue'
+import InvitationRegistrationForm from './login/InvitationRegistrationForm.vue'
+import { ref } from 'vue'
 import DesktopLoginServerSwitch from './desktop/DesktopLoginServerSwitch.vue'
 import { t } from '../composables/i18n'
 import type { UserProfile } from '../api/auth'
@@ -13,6 +15,17 @@ const emit = defineEmits<{
   (event: 'close'): void
   (event: 'login-success', payload: { token: string; username: string; profile?: UserProfile }): void
 }>()
+const initialCode = typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('invite_code') || ''
+const registering = ref(Boolean(initialCode))
+const registeredUsername = ref('')
+function completeRegistration(username: string) {
+  registeredUsername.value = username
+  registering.value = false
+  const url = new URL(window.location.href)
+  url.searchParams.delete('invite_code')
+  url.searchParams.delete('register')
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+}
 </script>
 
 <template>
@@ -22,8 +35,8 @@ const emit = defineEmits<{
         <div class="flex items-start gap-3">
           <img src="/movo-logo.png" alt="MOVO" class="mt-0.5 h-10 w-12 shrink-0 object-contain" />
           <div>
-            <div class="text-xl font-semibold text-slate-900">{{ t('login.title') }}</div>
-            <div class="mt-1 text-sm leading-5 text-slate-500">{{ t('login.password_desc') }}</div>
+            <div class="text-xl font-semibold text-slate-900">{{ registering ? t('invite.title') : t('login.title') }}</div>
+            <div class="mt-1 text-sm leading-5 text-slate-500">{{ registering ? t('invite.description') : t('login.password_desc') }}</div>
           </div>
         </div>
         <button
@@ -38,12 +51,15 @@ const emit = defineEmits<{
         </button>
       </div>
 
-      <PasswordLoginForm
+      <InvitationRegistrationForm v-if="registering" :initial-code="initialCode" @success="completeRegistration" />
+      <div v-else-if="registeredUsername" class="mt-5 rounded-xl bg-green-50 px-4 py-3 text-sm text-green-800">{{ t('invite.success') }}</div>
+      <PasswordLoginForm v-if="!registering"
         class="mt-6"
-        :suggested-username="savedUsers[0]"
+        :suggested-username="registeredUsername || savedUsers[0]"
         @login-success="emit('login-success', $event)"
       />
-      <DesktopLoginServerSwitch />
+      <button type="button" class="mt-4 text-sm text-blue-600 hover:underline" @click="registering = !registering">{{ registering ? t('invite.back_login') : t('invite.open_registration') }}</button>
+      <DesktopLoginServerSwitch v-if="!registering" />
     </div>
   </div>
 </template>

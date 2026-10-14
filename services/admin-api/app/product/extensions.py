@@ -18,6 +18,8 @@ class AdminProductExtension:
     startup: Sequence[Callable[[], Any]] = field(default_factory=tuple)
     model_created: Sequence[Callable[[str, str], Any]] = field(default_factory=tuple)
     model_deleted: Sequence[Callable[[str, str], Any]] = field(default_factory=tuple)
+    model_group_created: Sequence[Callable[[str, str], Any]] = field(default_factory=tuple)
+    model_group_deleted: Sequence[Callable[[str, str], Any]] = field(default_factory=tuple)
     resource_created: Sequence[Callable[[str, str, str], Any]] = field(default_factory=tuple)
     resource_deleted: Sequence[Callable[[str, str, str], Any]] = field(default_factory=tuple)
 

@@ -6,7 +6,7 @@ from typing import Any
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
@@ -33,6 +33,9 @@ from app.position_roles.constants import POSITION_ROLE_COLLECTION, USER_ROLE_COL
 from app.position_roles.service import PositionRoleService
 from app.services.employee_credentials import normalize_employee_credentials, redact_credential_payload
 from app.services.employee_tenant_identity import employee_tenant_fields
+from app.services.invite_links import request_portal_origin, resolve_portal_base
+from app.services.invite_policy import single_invite_role_ids, validate_invite_placement
+from app.services.invite_acceptances import record_invite_acceptance
 
 router = APIRouter()
 
@@ -220,12 +223,12 @@ class UserIdentityPayload(BaseModel):
 class OrgInviteCreatePayload(BaseModel):
     defaultDepartmentId: str | None = None
     expiresHours: int | None = Field(default=None, ge=1, le=24 * 30)
-    primaryRoleId: str = Field(min_length=1)
-    roleIds: list[str] = Field(min_length=1)
+    primaryRoleId: str = ""
+    roleIds: list[str] = Field(default_factory=list)
 
 
 class InviteAcceptPayload(BaseModel):
-    name: str = Field(default="", max_length=64)
+    name: str = Field(min_length=1, max_length=64)
     mobile: str = Field(default="", max_length=32)
     email: str = Field(default="", max_length=128)
     loginName: str = Field(default="", max_length=64)
@@ -732,6 +735,7 @@ async def enable_user(user_id: str, current_user: dict = Depends(get_current_adm
 @router.post("/invites")
 async def create_org_invite_link(
     payload: OrgInviteCreatePayload,
+    request: Request,
     current_user: dict = Depends(get_current_admin_user),
 ) -> dict[str, Any]:
     main_id = _main_id(current_user)
@@ -742,8 +746,9 @@ async def create_org_invite_link(
         )
     db = get_db()
     role_service = PositionRoleService()
-    await role_service.validate_roles(main_id, payload.roleIds, payload.primaryRoleId)
     default_department_id = payload.defaultDepartmentId or None
+    role_ids = single_invite_role_ids(payload.primaryRoleId, payload.roleIds)
+    await validate_invite_placement(db, main_id, default_department_id, payload.primaryRoleId, role_ids, role_service)
     if default_department_id:
         dep = await db[DEPARTMENT_COLLECTION].find_one(
             {"_id": _safe_oid(default_department_id, "部门ID无效"), "main_id": main_id, "status": "active"}
@@ -753,6 +758,8 @@ async def create_org_invite_link(
     ttl_hours = payload.expiresHours or max(1, int(settings.invite_token_ttl_hours))
     expires_at = _now() + timedelta(hours=ttl_hours)
     token = secrets.token_urlsafe(32)
+    portal_base = resolve_portal_base(settings.user_portal_base_url, settings.public_base_url, request_portal_origin(request), str(request.base_url))
+    invite_url = f"{portal_base}/?invite_code={token}&register=1"
     invite_doc = {
         "main_id": main_id,
         "user_id": None,
@@ -765,20 +772,19 @@ async def create_org_invite_link(
         "updated_at": _now(),
         "expires_at": expires_at,
         "used_at": None,
+        "accepted_count": 0,
         "default_department_id": default_department_id,
         "primary_role_id": payload.primaryRoleId,
-        "role_ids": payload.roleIds,
+        "role_ids": role_ids,
     }
     await db[USER_INVITE_COLLECTION].insert_one(invite_doc)
-    portal_base = settings.user_portal_base_url.rstrip("/")
-    invite_url = f"{portal_base}/?invite_code={token}&register=1"
     await _write_audit(
         main_id,
         str(current_user.get("username", "")),
         "create",
         "org_invite",
         token,
-        {"expiresHours": ttl_hours, "defaultDepartmentId": default_department_id, "primaryRoleId": payload.primaryRoleId, "roleIds": payload.roleIds},
+        {"expiresHours": ttl_hours, "defaultDepartmentId": default_department_id, "primaryRoleId": payload.primaryRoleId, "roleIds": role_ids},
     )
     return {
         "inviteUrl": invite_url,
@@ -837,7 +843,7 @@ async def accept_invite_link(token: str, payload: InviteAcceptPayload) -> dict[s
     role_service = PositionRoleService()
     invite_role_ids = [str(item) for item in invite.get("role_ids") or []]
     invite_primary_role_id = str(invite.get("primary_role_id") or "")
-    await role_service.validate_roles(main_id, invite_role_ids, invite_primary_role_id)
+    await validate_invite_placement(db, main_id, invite.get("default_department_id"), invite_primary_role_id, invite_role_ids, role_service)
     if invite.get("user_id"):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="当前邀请策略仅支持新用户注册，请联系管理员重置密码")
     user_id = str(invite.get("user_id", "") or "")
@@ -867,6 +873,8 @@ async def accept_invite_link(token: str, payload: InviteAcceptPayload) -> dict[s
         if duplicate and str(duplicate["_id"]) != user_id:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="登录名已存在")
 
+    if not payload.name.strip():
+        raise HTTPException(status_code=400, detail="请填写姓名")
     password_hash, password_salt = hash_password(payload.password)
     if user is None:
         await assert_member_capacity(main_id)
@@ -887,7 +895,7 @@ async def accept_invite_link(token: str, payload: InviteAcceptPayload) -> dict[s
         create_doc = {
             "main_id": main_id,
             **employee_tenant_fields(main_id, str(invite.get("org_name") or "")),
-            "name": payload.name.strip() or next_login,
+            "name": payload.name.strip(),
             "mobile": payload.mobile.strip(),
             "email": payload.email.strip(),
             "status": "active",
@@ -922,11 +930,12 @@ async def accept_invite_link(token: str, payload: InviteAcceptPayload) -> dict[s
                 }
             },
         )
-    await db[USER_INVITE_COLLECTION].update_one(
-        {"_id": invite["_id"]},
-        {"$set": {"status": "used", "used_at": _now(), "updated_at": _now()}},
-    )
     await role_service.repository.replace_user_roles(main_id, user_id, invite_role_ids, invite_primary_role_id, actor="invite")
+    if await record_invite_acceptance(db, main_id=main_id, invite_id=str(invite["_id"]), user_id=user_id):
+        await db[USER_INVITE_COLLECTION].update_one(
+            {"_id": invite["_id"], "status": "active"},
+            {"$inc": {"accepted_count": 1}, "$set": {"last_accepted_at": _now(), "updated_at": _now()}},
+        )
     await role_service.repository.audit(
         main_id,
         "invite",

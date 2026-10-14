@@ -9,6 +9,7 @@ from bson.errors import InvalidId
 
 from app.core.db import get_db
 from app.llm.configured_models import INSTANCE_COLLECTION, PROVIDER_COLLECTION
+from app.llm.model_group_config import load_model_group
 
 
 class ModelCatalog(Protocol):
@@ -37,13 +38,23 @@ class MongoModelCatalog:
         source_tenant = str(instance.get("main_id") or "")
         if source_tenant != tenant_id:
             raise ValueError("cross-tenant model access is forbidden")
+        group = await load_model_group(instance)
+        if group is not None and group.get("status") != "active":
+            raise ValueError("model group is disabled")
         provider = await db[PROVIDER_COLLECTION].find_one({"_id": instance.get("provider_id")})
         if provider is None:
             raise ValueError("model provider does not exist")
         return dict(instance), dict(provider)
 
     async def _default_instance(self, db: Any, tenant_id: str) -> dict[str, Any] | None:
-        return await db[INSTANCE_COLLECTION].find_one(
+        cursor = db[INSTANCE_COLLECTION].find(
             {"main_id": tenant_id, "status": "active", "capabilities": "chat"},
-            sort=[("priority", 1), ("updated_at", -1)],
-        )
+        ).sort([("priority", 1), ("updated_at", -1)])
+        async for instance in cursor:
+            try:
+                group = await load_model_group(instance)
+            except ValueError:
+                continue
+            if group is None or group.get("status") == "active":
+                return instance
+        return None

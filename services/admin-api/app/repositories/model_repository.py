@@ -12,6 +12,7 @@ from pymongo.errors import OperationFailure
 
 from app.core.config import settings
 from app.core.db import get_db
+from app.repositories.model_identity_index import ensure_model_identity_index
 from app.services.image_model_configuration import normalize_capabilities
 
 PROVIDER_COLLECTION = "admin_model_providers"
@@ -75,15 +76,11 @@ async def ensure_indexes() -> None:
     try:
         await db[PROVIDER_COLLECTION].create_index("code", unique=True, name="provider_code_unique")
         await db[PROVIDER_COLLECTION].create_index("status", name="provider_status")
-        await db[INSTANCE_COLLECTION].create_index(
-            [("main_id", 1), ("provider_id", 1), ("model_name", 1), ("display_name", 1)],
-            unique=True,
-            name="model_instance_identity_unique",
-        )
         await db[INSTANCE_COLLECTION].create_index([("main_id", 1), ("status", 1)], name="model_main_status")
         await db[INSTANCE_COLLECTION].create_index([("main_id", 1), ("is_default", 1)], name="model_main_default")
     except OperationFailure:
         pass
+    await ensure_model_identity_index(db[INSTANCE_COLLECTION])
     await seed_default_providers()
 
 
@@ -140,6 +137,7 @@ async def create_instance(payload: dict[str, Any]) -> str:
     doc = {
         "main_id": payload["main_id"],
         "provider_id": ObjectId(payload["provider_id"]),
+        "group_id": payload.get("group_id") or "",
         "org_id": payload.get("org_id") or "",
         "display_name": payload["display_name"],
         "model_name": payload["model_name"],
@@ -156,6 +154,7 @@ async def create_instance(payload: dict[str, Any]) -> str:
         "last_error": "",
         "is_default": bool(payload.get("is_default", False)),
         "priority": int(payload.get("priority") or 100),
+        "pricing": payload.get("pricing"),
         "created_at": now,
         "updated_at": now,
     }
@@ -172,6 +171,7 @@ async def update_instance(instance_id: str, payload: dict[str, Any]) -> bool:
     db = get_db()
     set_doc: dict[str, Any] = {
         "provider_id": ObjectId(payload["provider_id"]),
+        "group_id": payload.get("group_id") or "",
         "org_id": payload.get("org_id") or "",
         "display_name": payload["display_name"],
         "model_name": payload["model_name"],
@@ -183,6 +183,7 @@ async def update_instance(instance_id: str, payload: dict[str, Any]) -> bool:
         "status": payload.get("status") or "active",
         "is_default": bool(payload.get("is_default", False)),
         "priority": int(payload.get("priority") or 100),
+        "pricing": payload.get("pricing"),
         "updated_at": utcnow(),
     }
     if payload.get("settings") is not None:

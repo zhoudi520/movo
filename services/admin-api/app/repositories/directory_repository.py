@@ -13,6 +13,7 @@ USER_FIELD_DEF_COLLECTION = "user_field_defs"
 USER_FIELD_VALUE_COLLECTION = "user_field_values"
 USER_IDENTITY_COLLECTION = "user_identities"
 USER_INVITE_COLLECTION = "user_invites"
+USER_INVITE_ACCEPTANCE_COLLECTION = "user_invite_acceptances"
 AUDIT_LOG_COLLECTION = "audit_logs"
 
 
@@ -68,7 +69,20 @@ async def ensure_indexes() -> None:
         await db[USER_IDENTITY_COLLECTION].create_index([("main_id", 1), ("user_id", 1)], name="identity_user")
         await db[USER_INVITE_COLLECTION].create_index([("main_id", 1), ("token", 1)], unique=True, name="user_invite_token_unique")
         await db[USER_INVITE_COLLECTION].create_index([("main_id", 1), ("user_id", 1), ("created_at", -1)], name="user_invite_user_created")
-        await db[USER_INVITE_COLLECTION].create_index([("expires_at", 1)], expireAfterSeconds=0, name="user_invite_expires_ttl")
+        # Keep expired invites for administrator history. Older deployments used a TTL index.
+        try:
+            await db[USER_INVITE_COLLECTION].drop_index("user_invite_expires_ttl")
+        except OperationFailure as exc:
+            if exc.code != 27:  # IndexNotFound
+                raise
+        await db[USER_INVITE_COLLECTION].create_index([("main_id", 1), ("created_at", -1)], name="user_invite_history")
+        await db[USER_INVITE_COLLECTION].create_index([("main_id", 1), ("default_department_id", 1), ("created_at", -1)], name="user_invite_department_history")
+        await db[USER_INVITE_ACCEPTANCE_COLLECTION].create_index(
+            [("main_id", 1), ("invite_id", 1), ("user_id", 1)], unique=True, name="user_invite_acceptance_unique"
+        )
+        await db[USER_INVITE_ACCEPTANCE_COLLECTION].create_index(
+            [("main_id", 1), ("invite_id", 1), ("accepted_at", -1)], name="user_invite_acceptance_history"
+        )
         await db[AUDIT_LOG_COLLECTION].create_index([("main_id", 1), ("created_at", -1)], name="audit_main_created")
     except OperationFailure:
         # Keep startup resilient when db account has restricted index permissions.

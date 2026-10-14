@@ -15,6 +15,7 @@ from app.infrastructure.observability.execution_trace import ensure_trace_id
 from app.infrastructure.observability.spans import log_span
 from app.infrastructure.request_context import get_request_context
 from app.token_usage.models import TokenUsageRecord
+from app.token_usage.model_identity import usage_model_id
 from app.token_usage.sanitize import (
     build_request_payload,
     build_request_titles,
@@ -179,7 +180,7 @@ class InstrumentedLLMClient(BaseLLMClient):
                 node_id=self._node_id or str(output_spec.get("current_task_node_id") or ""),
                 status=status,
                 model_name=str(provider_meta.get("model_name") or self._model_name),
-                model_id=str(provider_meta.get("model_id") or self._model_id),
+                model_id=usage_model_id(self._model_id, provider_meta),
                 prompt=extract_prompt(messages),
                 request_title_zh=title_zh,
                 request_title_en=title_en,

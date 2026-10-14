@@ -37,11 +37,15 @@ from app.services.image_model_configuration import (
 )
 from app.services.model_image_connectivity import run_saved_image_model_test
 from app.services.model_test_tls import build_model_test_ssl_context
+from app.services.model_pricing import normalize_pricing
 from app.api.routes import model_knowledge_tests
+from app.api.routes import model_groups
+from app.repositories.model_group_repository import find_group, list_groups
 from app.product.extensions import get_admin_product_extension
 
 router = APIRouter()
 router.include_router(model_knowledge_tests.router)
+router.include_router(model_groups.router)
 
 
 def _as_time(value: datetime | None) -> str:
@@ -68,34 +72,41 @@ def _format_provider(doc: dict[str, Any]) -> dict[str, object]:
     }
 
 
-def _format_instance(doc: dict[str, Any], provider_map: dict[str, dict[str, Any]]) -> dict[str, object]:
+def _format_instance(doc: dict[str, Any], provider_map: dict[str, dict[str, Any]], group_map: dict[str, dict[str, Any]] | None = None) -> dict[str, object]:
     provider_id = str(doc.get("provider_id", ""))
     provider = provider_map.get(provider_id, {})
+    group_id = str(doc.get("group_id") or "")
+    group = (group_map or {}).get(group_id, {})
     capabilities = normalize_capabilities(doc.get("capabilities", []))
     runtime_kind = infer_image_runtime_kind(
         provider=provider,
         requested=str(doc.get("runtime_kind") or ""),
         capabilities=capabilities,
-        base_url=str(doc.get("base_url") or ""),
+        base_url=str(group.get("base_url") or doc.get("base_url") or ""),
     )
     image_settings = _validated_image_settings(
         runtime_kind=runtime_kind,
         model_name=str(doc.get("model_name") or ""),
         raw=doc.get("settings"),
     )
+    try:
+        pricing = normalize_pricing(doc.get("pricing"))
+    except ValueError:
+        pricing = None
     return {
         "id": str(doc["_id"]),
         "mainId": doc.get("main_id", ""),
         "providerId": provider_id,
+        "groupId": group_id,
         "providerName": provider.get("name", ""),
         "providerCode": provider.get("code", ""),
         "providerType": provider.get("provider_type", "openai_compatible"),
         "orgId": doc.get("org_id", ""),
         "displayName": doc.get("display_name", ""),
         "modelName": doc.get("model_name", ""),
-        "baseUrl": doc.get("base_url", "") or provider.get("default_base_url", ""),
-        "apiVersion": doc.get("api_version", ""),
-        "apiKeyMasked": doc.get("api_key_masked", ""),
+        "baseUrl": group.get("base_url") or doc.get("base_url", "") or provider.get("default_base_url", ""),
+        "apiVersion": group.get("api_version") or doc.get("api_version", ""),
+        "apiKeyMasked": group.get("api_key_masked") or doc.get("api_key_masked", ""),
         "apiSecretMasked": doc.get("api_secret_masked", ""),
         "capabilities": capabilities,
         "runtimeKind": runtime_kind,
@@ -106,12 +117,17 @@ def _format_instance(doc: dict[str, Any], provider_map: dict[str, dict[str, Any]
         "lastError": doc.get("last_error", ""),
         "isDefault": bool(doc.get("is_default", False)),
         "priority": doc.get("priority", 100),
+        "pricing": (
+            {"currency": pricing["currency"], "inputPerMillion": float(pricing["inputPerMillion"]), "outputPerMillion": float(pricing["outputPerMillion"])}
+            if pricing else None
+        ),
         "updatedAt": _as_time(doc.get("updated_at")),
     }
 
 
 class ModelInstancePayload(BaseModel):
     providerId: str = Field(min_length=1)
+    groupId: str = Field(default="")
     orgId: str = Field(default="", max_length=80)
     displayName: str = Field(min_length=1, max_length=80)
     modelName: str = Field(min_length=1, max_length=120)
@@ -126,10 +142,18 @@ class ModelInstancePayload(BaseModel):
     status: str = Field(default="active", pattern=r"^(active|disabled)$")
     isDefault: bool = False
     priority: int = Field(default=100, ge=1, le=999)
+    pricing: dict[str, Any] | None = None
 
 
 class ModelTestPayload(BaseModel):
     prompt: str = Field(default="请用一句话回复当前模型连接测试。", max_length=500)
+
+
+def _validated_pricing(value: Any) -> dict[str, Any] | None:
+    try:
+        return normalize_pricing(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/providers")
@@ -145,7 +169,8 @@ async def get_model_instances(current_user: dict = Depends(get_current_admin_use
     providers = await list_providers()
     provider_map = {str(item["_id"]): item for item in providers}
     instances = await list_instances(main_id)
-    return [_format_instance(item, provider_map) for item in instances]
+    group_map = {str(group["_id"]): group for group in await list_groups(main_id)}
+    return [_format_instance(item, provider_map, group_map) for item in instances]
 
 
 @router.get("/available")
@@ -157,14 +182,18 @@ async def get_available_chat_models(
     providers = await list_providers()
     provider_map = {str(item["_id"]): item for item in providers}
     instances = await list_instances(str(main_id or "default"))
+    group_map = {str(group["_id"]): group for group in await list_groups(main_id)}
     result: list[dict[str, object]] = []
     for item in instances:
         if item.get("status") != "active":
             continue
+        group_id = str(item.get("group_id") or "")
+        if group_id and group_map.get(group_id, {}).get("status") != "active":
+            continue
         capabilities = list(item.get("capabilities") or [])
         if "chat" not in capabilities and "text" not in capabilities:
             continue
-        formatted = _format_instance(item, provider_map)
+        formatted = _format_instance(item, provider_map, group_map)
         result.append(
             {
                 "id": formatted["id"],
@@ -191,7 +220,10 @@ async def post_model_instance(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="供应商ID无效") from exc
     if provider is None or provider.get("status") != "active":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="供应商不存在或已禁用")
-    if not payload.apiKey.strip():
+    group = await find_group(payload.groupId, main_id) if payload.groupId else None
+    if payload.groupId and (group is None or str(group.get("provider_id")) != payload.providerId):
+        raise HTTPException(status_code=400, detail="model_group_invalid")
+    if not group and not payload.apiKey.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="API Key 不能为空")
 
     capabilities = normalize_capabilities(payload.capabilities)
@@ -199,7 +231,7 @@ async def post_model_instance(
         provider=provider,
         requested=payload.runtimeKind,
         capabilities=capabilities,
-        base_url=payload.baseUrl,
+        base_url=str(group.get("base_url") or "") if group else payload.baseUrl,
     )
     image_settings = _validated_image_settings(
         runtime_kind=runtime_kind,
@@ -211,12 +243,13 @@ async def post_model_instance(
             {
                 **payload.model_dump(),
                 "provider_id": payload.providerId,
+                "group_id": payload.groupId,
                 "org_id": payload.orgId,
                 "display_name": payload.displayName,
                 "model_name": payload.modelName,
-                "base_url": payload.baseUrl,
-                "api_version": payload.apiVersion,
-                "api_key": payload.apiKey,
+                "base_url": "" if group else payload.baseUrl,
+                "api_version": "" if group else payload.apiVersion,
+                "api_key": "" if group else payload.apiKey,
                 "api_secret": payload.apiSecret,
                 "capabilities": capabilities,
                 "runtime_kind": runtime_kind,
@@ -224,6 +257,7 @@ async def post_model_instance(
                 "max_context_tokens": payload.maxContextTokens,
                 "is_default": payload.isDefault,
                 "main_id": main_id,
+                "pricing": _validated_pricing(payload.pricing),
             }
         )
     except DuplicateKeyError as exc:
@@ -242,7 +276,7 @@ async def post_model_instance(
         raise
     providers = await list_providers()
     provider_map = {str(item["_id"]): item for item in providers}
-    return _format_instance(created, provider_map)
+    return _format_instance(created, provider_map, {payload.groupId: group} if group else None)
 
 
 @router.put("/instances/{instance_id}")
@@ -258,12 +292,20 @@ async def put_model_instance(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="供应商ID无效") from exc
     if provider is None or provider.get("status") != "active":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="供应商不存在或已禁用")
+    existing = await find_instance_by_id(instance_id, main_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="model_not_found")
+    if str(existing.get("group_id") or "") != payload.groupId:
+        raise HTTPException(status_code=409, detail="model_group_membership_immutable")
+    group = await find_group(payload.groupId, main_id) if payload.groupId else None
+    if payload.groupId and (group is None or str(group.get("provider_id")) != payload.providerId):
+        raise HTTPException(status_code=400, detail="model_group_invalid")
     capabilities = normalize_capabilities(payload.capabilities)
     runtime_kind = infer_image_runtime_kind(
         provider=provider,
         requested=payload.runtimeKind,
         capabilities=capabilities,
-        base_url=payload.baseUrl,
+        base_url=str(group.get("base_url") or "") if group else payload.baseUrl,
     )
     image_settings = _validated_image_settings(
         runtime_kind=runtime_kind,
@@ -277,12 +319,13 @@ async def put_model_instance(
             {
                 **payload.model_dump(),
                 "provider_id": payload.providerId,
+                "group_id": payload.groupId,
                 "org_id": payload.orgId,
                 "display_name": payload.displayName,
                 "model_name": payload.modelName,
-                "base_url": payload.baseUrl,
-                "api_version": payload.apiVersion,
-                "api_key": payload.apiKey,
+                "base_url": "" if group else payload.baseUrl,
+                "api_version": "" if group else payload.apiVersion,
+                "api_key": "" if group else payload.apiKey,
                 "api_secret": payload.apiSecret,
                 "capabilities": capabilities,
                 "runtime_kind": runtime_kind,
@@ -290,6 +333,7 @@ async def put_model_instance(
                 "max_context_tokens": payload.maxContextTokens,
                 "is_default": payload.isDefault,
                 "main_id": main_id,
+                "pricing": _validated_pricing(payload.pricing),
             },
         )
     except InvalidId as exc:
@@ -304,7 +348,7 @@ async def put_model_instance(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型配置不存在")
     providers = await list_providers()
     provider_map = {str(item["_id"]): item for item in providers}
-    return _format_instance(updated, provider_map)
+    return _format_instance(updated, provider_map, {payload.groupId: group} if group else None)
 
 
 @router.delete("/instances/{instance_id}")

@@ -11,9 +11,11 @@ export interface TokenStatsSummary {
   last24hTokens: number;
   activeUsers: number;
   activeDepartments: number;
-  totalCost: number;
-  avgCost: number;
-  last24hCost: number;
+  costsByCurrency: Record<'CNY' | 'USD', number>;
+  pricedCallsByCurrency: Record<'CNY' | 'USD', number>;
+  avgCostsByCurrency: Record<'CNY' | 'USD', number>;
+  last24hCostsByCurrency: Record<'CNY' | 'USD', number>;
+  unpricedCalls: number;
 }
 
 export interface TokenStatsItem {
@@ -45,6 +47,7 @@ export interface TokenStatsOption {
 export interface TokenStatsFilterOptions {
   enterprises: TokenStatsOption[];
   departments: TokenStatsOption[];
+  users: TokenStatsOption[];
   models: TokenStatsOption[];
   stages: TokenStatsOption[];
   statuses: TokenStatsOption[];
@@ -63,6 +66,7 @@ export interface TokenStatsPage {
 export interface TokenStatsQuery {
   q?: string;
   departmentId?: string;
+  userId?: string;
   modelName?: string;
   stage?: string;
   status?: string;
@@ -84,14 +88,17 @@ const defaultSummary: TokenStatsSummary = {
   last24hTokens: 0,
   activeUsers: 0,
   activeDepartments: 0,
-  totalCost: 0,
-  avgCost: 0,
-  last24hCost: 0,
+  costsByCurrency: { CNY: 0, USD: 0 },
+  pricedCallsByCurrency: { CNY: 0, USD: 0 },
+  avgCostsByCurrency: { CNY: 0, USD: 0 },
+  last24hCostsByCurrency: { CNY: 0, USD: 0 },
+  unpricedCalls: 0,
 };
 
 const defaultOptions: TokenStatsFilterOptions = {
   enterprises: [],
   departments: [],
+  users: [],
   models: [],
   stages: [],
   statuses: [],
@@ -101,6 +108,7 @@ export async function fetchTokenStats(query: TokenStatsQuery = {}): Promise<Toke
   const params = {
     q: query.q || '',
     departmentId: query.departmentId || '',
+    userId: query.userId || '',
     modelName: query.modelName || '',
     stage: query.stage || '',
     status: query.status || '',

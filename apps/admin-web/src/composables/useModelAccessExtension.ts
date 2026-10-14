@@ -6,8 +6,8 @@ export function useModelAccessExtension() {
   const value = ref<unknown>(extension?.createValue())
   const loading = ref(false)
 
-  function reset() {
-    value.value = extension?.createValue()
+  function reset(grouped = false) {
+    value.value = extension?.createValue(grouped)
   }
 
   async function load(modelId: string) {
