@@ -332,6 +332,32 @@ services:
       timeout: 5s
       retries: 20
 
+  jira-mcp-gateway:
+    profiles: ["jira-mcp"]
+    build: ./services/jira-mcp-gateway
+    restart: unless-stopped
+    environment:
+      ADMIN_API_BASE_URL: http://admin-api:8100
+      CONFIG_POLL_INTERVAL_SECONDS: 15
+      PUBLIC_PORT: 8766
+      PUBLIC_HOST: 0.0.0.0
+      RUNTIME_ENV_PATH: /run/askai-secrets/runtime.env
+    volumes:
+      - deployment-secrets:/run/askai-secrets:ro
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - backend
+    ports:
+      - "127.0.0.1:8766:8766"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8766/healthz >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 45s
+
 networks:
   public:
   backend:

@@ -91,6 +91,12 @@ export const appRoutes: RouteRecordRaw[] = [
         meta: { title: '工具与 MCP', icon: ToolsMcpIcon },
       },
       {
+        path: '/tools/jira-mcp-gateway',
+        name: 'JiraMcpGateway',
+        component: () => import('@/views/tools/JiraMcpGatewayPage.vue'),
+        meta: { title: 'Jira MCP 网关', hideInMenu: true },
+      },
+      {
         path: '/tools/new',
         name: 'ToolCreate',
         component: () => import('@/views/tools/ToolEditPage.vue'),

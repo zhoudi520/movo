@@ -12,6 +12,7 @@ from app.repositories.model_group_repository import ensure_indexes as ensure_mod
 from app.api.routes.skills import ensure_indexes as ensure_skill_indexes
 from app.api.routes.skill_lifecycle import ensure_indexes as ensure_skill_lifecycle_indexes
 from app.api.routes.tools import ensure_indexes as ensure_tool_indexes
+from app.services.jira_mcp_gateway import ensure_indexes as ensure_jira_mcp_gateway_indexes
 from app.api.routes.external_search import ensure_indexes as ensure_external_search_indexes
 from app.api.routes.knowledge_documents import ensure_indexes as ensure_knowledge_document_indexes
 from app.api.routes.knowledge_directories import ensure_indexes as ensure_knowledge_directory_indexes
@@ -58,6 +59,7 @@ def create_app() -> FastAPI:
         await ensure_skill_indexes()
         await ensure_skill_lifecycle_indexes()
         await ensure_tool_indexes()
+        await ensure_jira_mcp_gateway_indexes()
         await repair_role_referenced_personal_tools()
         await ensure_external_search_indexes()
         await ensure_page_collection_indexes()
