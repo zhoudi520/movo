@@ -155,6 +155,9 @@ class ScriptPluginExecutor(BaseExecutor):
             stdin_path.write_text(json.dumps(payload, ensure_ascii=False, default=str), encoding="utf-8")
 
             started = time.monotonic()
+            popen_kwargs: Dict[str, Any] = {}
+            if resource is not None:
+                popen_kwargs["preexec_fn"] = self._limit_child_process
             completed = subprocess.run(
                 [sys.executable, "-I", str(runner_path), str(plugin_path), str(stdin_path)],
                 cwd=str(work_dir),
@@ -163,7 +166,7 @@ class ScriptPluginExecutor(BaseExecutor):
                 stderr=subprocess.PIPE,
                 text=True,
                 timeout=self._TIMEOUT_SECONDS,
-                preexec_fn=self._limit_child_process,
+                **popen_kwargs,
             )
             duration_ms = int((time.monotonic() - started) * 1000)
             stdout = (completed.stdout or "")[: self._MAX_STDOUT_BYTES]
