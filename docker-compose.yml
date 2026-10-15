@@ -151,6 +151,7 @@ services:
       STORAGE_BACKEND: local
       LOCAL_STORAGE_PATH: /app/storage
       FILE_PUBLIC_PATH_PREFIX: /askai-api/api/files
+      USER_PORTAL_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:${MOVO_PORT:-${ASKAI_PORT:-3000}}}
       BACKEND_INTERNAL_BASE_URL: http://chat-api:8000
       ADMIN_API_BASE_URL: http://admin-api:8100
       DOCUMENT_PROCESSING_BASE_URL: http://document-api:8200

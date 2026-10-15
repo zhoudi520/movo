@@ -1,6 +1,12 @@
 export function codeRuntimeErrorMessage(error: unknown, locale: 'zh' | 'en'): string {
   const raw = String(error instanceof Error ? error.message : error || '')
   const normalized = raw.toLowerCase()
+  if (normalized.includes('code permission setting') || normalized.includes('code permission config') ||
+      normalized.includes('automatic review requires')) {
+    return locale === 'zh'
+      ? '自定义权限配置无效。请打开 config.toml 检查三个设置项，保存后重试。'
+      : 'Invalid custom permissions. Open config.toml, check the three settings, save, and retry.'
+  }
   if (normalized.includes('already owned by an active write handle')) {
     return locale === 'zh'
       ? '此会话正在恢复中，请稍后重试。若问题持续，请重启桌面端。'

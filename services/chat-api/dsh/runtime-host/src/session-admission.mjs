@@ -1,4 +1,5 @@
 import { resolveSessionSeed } from './session-seed.mjs'
+import { codePermissionPolicy } from './code-permission-policy.mjs'
 
 // The parent Host resolves predecessor identities before sending a trusted
 // seed to a plugin-isolated child. Raw seeds remain forbidden at the public API.
@@ -16,10 +17,7 @@ export async function admitSessionBody(input, seedSource, { trusted = false } = 
   }
   if (body.presetId === 'code') {
     if (body.workspaceId === undefined) throw new Error('Code Session requires a DSH workspaceId')
-    if (body.permissionPreset !== undefined && body.permissionPreset !== 'workspace-write') {
-      throw new Error('desktop Code Session permissionPreset exceeds MOVO policy')
-    }
-    body.permissionPreset = 'workspace-write'
+    Object.assign(body, codePermissionPolicy(body))
   }
   return body
 }

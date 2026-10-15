@@ -20,11 +20,13 @@ interface ElectronApi {
     branches(workspaceId: string, modelId?: string): Promise<DshGitBranchSnapshot>
     switchBranch(workspaceId: string, fullRef: string, modelId?: string): Promise<DshGitBranchSnapshot>
     createBranch(workspaceId: string, name: string, sourceRef?: string, modelId?: string): Promise<DshGitBranchSnapshot>
-    createCodeSession(workspaceId: string, draftId: string, title: string, modelId?: string, useWorktree?: boolean, sourceRef?: string): Promise<DshCodeSession>
+    createCodeSession(workspaceId: string, draftId: string, title: string, modelId?: string, useWorktree?: boolean, sourceRef?: string, permissionMode?: import('./types').CodePermissionMode): Promise<DshCodeSession>
   }
   dshCodeSession: {
     attach(conversationId: string): Promise<DshCodeSession | null>
-    send(sessionId: string, text: string): Promise<{ accepted: boolean; messageId: string }>
+    send(sessionId: string, text: string, permissionMode?: import('./types').CodePermissionMode): Promise<{ accepted: boolean; messageId: string }>
+    openPermissionConfig(): Promise<string>
+    validatePermissionConfig(): Promise<string>
     cancel(sessionId: string): Promise<DshTurnCancelResult>
     subscribe(sessionId: string, after?: number): Promise<{ subscribed: boolean }>
     unsubscribe(sessionId: string): Promise<{ unsubscribed: boolean }>
@@ -120,9 +122,11 @@ export const deleteDshWorkspace = (workspaceId: string, modelId?: string) => api
 export const listDshWorkspaceBranches = (workspaceId: string, modelId?: string) => api().dshWorkspace.branches(workspaceId, modelId)
 export const switchDshWorkspaceBranch = (workspaceId: string, fullRef: string, modelId?: string) => api().dshWorkspace.switchBranch(workspaceId, fullRef, modelId)
 export const createDshWorkspaceBranch = (workspaceId: string, name: string, sourceRef = 'HEAD', modelId?: string) => api().dshWorkspace.createBranch(workspaceId, name, sourceRef, modelId)
-export const createDshCodeSession = (workspaceId: string, draftId: string, title: string, modelId?: string, useWorktree?: boolean, sourceRef?: string) =>
-  api().dshWorkspace.createCodeSession(workspaceId, draftId, title, modelId, useWorktree, sourceRef)
-export const sendDshCodeTurn = (sessionId: string, text: string) => api().dshCodeSession.send(sessionId, text)
+export const createDshCodeSession = (workspaceId: string, draftId: string, title: string, modelId?: string, useWorktree?: boolean, sourceRef?: string, permissionMode?: import('./types').CodePermissionMode) =>
+  api().dshWorkspace.createCodeSession(workspaceId, draftId, title, modelId, useWorktree, sourceRef, permissionMode)
+export const sendDshCodeTurn = (sessionId: string, text: string, permissionMode?: import('./types').CodePermissionMode) => api().dshCodeSession.send(sessionId, text, permissionMode)
+export const openDshCodePermissionConfig = () => api().dshCodeSession.openPermissionConfig()
+export const validateDshCodePermissionConfig = () => api().dshCodeSession.validatePermissionConfig()
 export const attachDshCodeConversation = (conversationId: string) => api().dshCodeSession.attach(conversationId)
 export const cancelDshCodeTurn = (sessionId: string) => api().dshCodeSession.cancel(sessionId)
 export const subscribeDshCodeEvents = (sessionId: string, after?: number) => api().dshCodeSession.subscribe(sessionId, after)

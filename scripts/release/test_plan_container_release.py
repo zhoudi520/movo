@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -100,6 +101,29 @@ class ContainerReleasePlanTests(unittest.TestCase):
             "MOVO_SECURITY_REFRESH=${{ github.run_id }}-${{ github.run_attempt }}",
             workflow,
         )
+
+    def test_document_parser_exceptions_are_scoped_and_expire(self):
+        workflow = (REPOSITORY_ROOT / ".github/workflows/container-release.yml").read_text()
+        ignore = (
+            REPOSITORY_ROOT / ".github/security/document-parser.trivyignore.yaml"
+        ).read_text()
+        self.assertIn("if: matrix.suffix == 'document-parser'", workflow)
+        self.assertIn("- name: Scan candidate image (release gate)", workflow)
+        self.assertIn("exit-code: \"1\"", workflow)
+        self.assertEqual(1, workflow.count("trivyignores:"))
+        self.assertIn(
+            "trivyignores: ${{ matrix.suffix == 'document-parser' && "
+            "'.github/security/document-parser.trivyignore.yaml' || '' }}",
+            workflow,
+        )
+        self.assertEqual(
+            {"CVE-2026-105744", "CVE-2026-96748", "CVE-2026-96749"},
+            set(re.findall(r"^  - id: (CVE-\d+-\d+)$", ignore, re.MULTILINE)),
+        )
+        self.assertEqual(3, ignore.count("expired_at: 2026-11-14"))
+        self.assertIn("pkg:pypi/docling@2.94.0", ignore)
+        self.assertIn("pkg:pypi/docling-slim@2.94.0", ignore)
+        self.assertIn("pkg:pypi/pymongo@3.13.0", ignore)
 
     def test_release_diff_uses_last_successful_container_release(self):
         workflow = (REPOSITORY_ROOT / ".github/workflows/container-release.yml").read_text()

@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from app.api.router import api_router
 from app.core.db import close_db
+from app.core.request_body_limit import RequestBodyLimitMiddleware
 from app.repositories.job_repository import ensure_job_indexes
 
 
@@ -13,6 +14,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         description="Async document preview conversion, parsing, chunking and indexing service for MOVO.",
     )
+    app.add_middleware(RequestBodyLimitMiddleware)
     app.include_router(api_router, prefix="/api")
 
     @app.on_event("startup")

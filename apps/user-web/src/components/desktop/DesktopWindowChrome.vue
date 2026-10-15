@@ -3,6 +3,7 @@ import FolderOpenOutline from '@vicons/ionicons5/es/FolderOpenOutline'
 import GitCompareOutline from '@vicons/ionicons5/es/GitCompareOutline'
 import TerminalOutline from '@vicons/ionicons5/es/TerminalOutline'
 import BrowserTestButton from '../browser/BrowserTestButton.vue'
+import DesktopSessionShareAction from './DesktopSessionShareAction.vue'
 import DesktopUpdateIndicator from './DesktopUpdateIndicator.vue'
 import WorkspaceContextPicker from '../code/WorkspaceContextPicker.vue'
 import BranchContextPicker from '../code/BranchContextPicker.vue'
@@ -19,6 +20,10 @@ defineProps<{
   backLabel?: string
   chatActions?: boolean
   sessionId?: string
+  userId?: string
+  mainId?: string
+  authToken?: string | null
+  membersRevision?: number
   workspace?: DshWorkspace | null
   showWorkspaceContext?: boolean
   workspaceBranch?: string
@@ -50,6 +55,7 @@ const emit = defineEmits<{
   (event: 'branch-updated', branch: string): void
   (event: 'open-browser'): void
   (event: 'toggle-code-panel', mode: 'changes' | 'files' | 'terminal'): void
+  (event: 'session-left', sessionId: string): void
 }>()
 </script>
 
@@ -158,6 +164,15 @@ const emit = defineEmits<{
       <div class="desktop-window-chrome__actions">
         <DesktopUpdateIndicator />
         <template v-if="chatActions">
+          <DesktopSessionShareAction
+            v-if="sessionId && userId"
+            :session-id="sessionId"
+            :user-id="userId"
+            :main-id="mainId || 'default'"
+            :auth-token="authToken || null"
+            :members-revision="membersRevision"
+            @left="emit('session-left', $event)"
+          />
           <button
             v-if="codeAvailable && codeSessionActive && gitAvailable"
             type="button"

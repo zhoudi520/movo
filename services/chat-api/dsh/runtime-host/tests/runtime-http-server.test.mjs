@@ -80,8 +80,18 @@ test('Runtime Host delegates workspace lifecycle and cwd binding to native DSH r
     })
     assert.equal(session.workspaceId, workspace.workspaceId)
     assert.equal(session.permissionPreset, 'workspace-write')
+    const full = await request(base, `${runtimePath}/sessions`, {
+      method: 'POST', body: JSON.stringify({ sessionId: 'full-session', presetId: 'code', workspaceId: workspace.workspaceId,
+        permissionPreset: 'danger-full-access', approvalPolicy: 'never' }),
+    })
+    assert.equal(full.permissionPreset, 'danger-full-access')
+    const reviewed = await request(base, `${runtimePath}/sessions`, {
+      method: 'POST', body: JSON.stringify({ sessionId: 'reviewed-session', presetId: 'code', workspaceId: workspace.workspaceId,
+        permissionPreset: 'workspace-write', approvalReviewer: 'auto_review', approvalPolicy: 'ask' }),
+    })
+    assert.equal(reviewed.permissionPreset, 'workspace-write')
     const listed = await request(base, `${runtimePath}/workspaces`)
-    assert.deepEqual(listed.workspaces[0].sessionIds, ['workspace-session'])
+    assert.deepEqual(new Set(listed.workspaces[0].sessionIds), new Set(['workspace-session', 'full-session', 'reviewed-session']))
 
     const rawCwd = await fetch(`${base}${runtimePath}/sessions`, {
       method: 'POST', headers, body: JSON.stringify({ sessionId: 'unsafe-session', presetId: 'code', cwd: project }),

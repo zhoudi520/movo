@@ -1,0 +1,28 @@
+# Temporary, document-parser-only risk acceptance. Revisit by 2026-11-14.
+# The unfiltered Trivy report remains visible in the Container Release job.
+vulnerabilities:
+  - id: CVE-2026-105744
+    purls:
+      - pkg:pypi/docling@2.94.0
+      - pkg:pypi/docling-slim@2.94.0
+    expired_at: 2026-11-14
+    statement: >-
+      Not affected in MOVO's document parser: the opt-in Tectonic/TikZ
+      rendering engine is never enabled. Reassess if LaTeX rendering is added.
+  - id: CVE-2026-96748
+    purls:
+      - pkg:pypi/pymongo@3.13.0
+    expired_at: 2026-11-14
+    statement: >-
+      Temporary risk acceptance for document-parser only: the MongoDB URI is
+      operator-supplied; the official Compose deployment uses a fixed URI,
+      not an untrusted hostname supplied by an API caller.
+  - id: CVE-2026-96749
+    purls:
+      - pkg:pypi/pymongo@3.13.0
+    expired_at: 2026-11-14
+    statement: >-
+      Temporary risk acceptance for document-parser only: the PyMongo write
+      paths store small job metadata and generated status; HTTP request bodies
+      are capped at 8 MiB before reaching BSON encoding. Reassess if a new
+      caller-controlled MongoDB write path is introduced.

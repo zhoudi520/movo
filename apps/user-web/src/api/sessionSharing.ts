@@ -52,6 +52,7 @@ function errorOf(error: any): SessionShareError {
 export interface SessionShareCreated {
   /** Raw share token: shown once, only ever placed in the clipboard or link input. */
   token: string
+  url?: string
   expires_at: string
   participant_count: number
 }

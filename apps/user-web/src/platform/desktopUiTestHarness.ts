@@ -25,6 +25,8 @@ export function installDesktopUiTestHarness() {
       createCodeSession: async () => ({ runtime_id: 'runtime-ui', kernel_session_id: sessionId, dsh_workspace_id: workspace.workspace_id, preset_id: 'code', profile_version: 'profile-ui', model_instance_id: 'model-ui', conversation_id: '66c000000000000000000001', binding_id: 'binding-ui', source_workspace_id: workspace.workspace_id, source_ref: 'refs/heads/main', base_commit: 'a'.repeat(40), detached_head: true, execution_mode: 'worktree', worktree: true }),
     },
     dshCodeSession: {
+      openPermissionConfig: async () => '/tmp/code-permissions.toml',
+      validatePermissionConfig: async () => '/tmp/code-permissions.toml',
       attach: async () => null, subscribe: async () => ({ subscribed: true }), unsubscribe: async () => ({ unsubscribed: true }),
       onEvent: (listener: any) => { listeners.add(listener); return () => listeners.delete(listener) },
       send: async () => {

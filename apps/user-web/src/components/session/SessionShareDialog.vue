@@ -75,6 +75,7 @@ const expiresInDays = ref(30)
 
 const shareUrl = computed(() => {
   if (!share.value || typeof window === 'undefined') return ''
+  if (share.value.url) return share.value.url
   const url = new URL('/', window.location.origin)
   url.searchParams.set('session-share', share.value.token)
   return url.toString()

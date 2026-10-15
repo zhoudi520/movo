@@ -44,8 +44,10 @@ export const deleteDshWorkspace: (workspaceId: string, modelId?: string) => Prom
 export const listDshWorkspaceBranches: (workspaceId: string, modelId?: string) => Promise<DshGitBranchSnapshot> = impl.listDshWorkspaceBranches
 export const switchDshWorkspaceBranch: (workspaceId: string, fullRef: string, modelId?: string) => Promise<DshGitBranchSnapshot> = impl.switchDshWorkspaceBranch
 export const createDshWorkspaceBranch: (workspaceId: string, name: string, sourceRef?: string, modelId?: string) => Promise<DshGitBranchSnapshot> = impl.createDshWorkspaceBranch
-export const createDshCodeSession: (workspaceId: string, draftId: string, title: string, modelId?: string, useWorktree?: boolean, sourceRef?: string) => Promise<DshCodeSession> = impl.createDshCodeSession
-export const sendDshCodeTurn: (sessionId: string, text: string) => Promise<{ accepted: boolean; messageId: string }> = impl.sendDshCodeTurn
+export const createDshCodeSession: (workspaceId: string, draftId: string, title: string, modelId?: string, useWorktree?: boolean, sourceRef?: string, permissionMode?: import('./types').CodePermissionMode) => Promise<DshCodeSession> = impl.createDshCodeSession
+export const sendDshCodeTurn: (sessionId: string, text: string, permissionMode?: import('./types').CodePermissionMode) => Promise<{ accepted: boolean; messageId: string }> = impl.sendDshCodeTurn
+export const openDshCodePermissionConfig: () => Promise<string> = impl.openDshCodePermissionConfig
+export const validateDshCodePermissionConfig: () => Promise<string> = impl.validateDshCodePermissionConfig
 export const attachDshCodeConversation: (conversationId: string) => Promise<DshCodeSession | null> = impl.attachDshCodeConversation
 export const cancelDshCodeTurn: (sessionId: string) => Promise<DshTurnCancelResult> = impl.cancelDshCodeTurn
 export const subscribeDshCodeEvents: (sessionId: string, after?: number) => Promise<{ subscribed: boolean }> = impl.subscribeDshCodeEvents

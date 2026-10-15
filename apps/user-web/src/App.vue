@@ -7,6 +7,7 @@ import TokenUsagePage from './components/TokenUsagePage.vue'
 import ProfileModal from './components/ProfileModal.vue'
 import productUiExtension from '@movo-product-extension'
 import DesktopWindowChrome from './components/desktop/DesktopWindowChrome.vue'
+import SessionSnapshotViewer from './components/session/SessionSnapshotViewer.vue'
 import DesktopPrimaryNavigation, { type DesktopPrimarySection } from './components/desktop/DesktopPrimaryNavigation.vue'
 import WindowsTitleBar from './components/desktop/WindowsTitleBar.vue'
 import ChatSessionHeader from './components/chat/ChatSessionHeader.vue'
@@ -138,6 +139,7 @@ const sharedSessionsHasMore = ref(false)
 // confirmed login consumes it. A 401 on the join keeps the stash so the
 // auth-expired re-login retries; a definitive share-token failure clears it.
 const pendingSessionShareToken = ref<string | null>(null)
+const pendingSnapshotToken = ref<string | null>(null)
 // T27: App.vue hosts the message providers, so useMessage() is unavailable in
 // its own setup — the discrete API is the documented way to toast from here,
 // themed to match the app's provider.
@@ -2075,6 +2077,16 @@ function captureSessionShareToken() {
   window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
 }
 
+function captureSnapshotToken() {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+  const token = url.searchParams.get('session-snapshot')
+  if (!token) return
+  pendingSnapshotToken.value = token
+  url.searchParams.delete('session-snapshot')
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+}
+
 function shareSessionErrorToastMessage(error: SessionShareError): string {
   switch (error.code) {
     case 'session_not_found':
@@ -2216,6 +2228,7 @@ onMounted(async () => {
   // the path, dropping query params) — the capture strips it from history and
   // stashes it for the post-login join.
   captureSessionShareToken()
+  captureSnapshotToken()
   window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired)
   applyThemeMode()
   systemThemeMedia = window.matchMedia('(prefers-color-scheme: dark)')
@@ -2354,6 +2367,11 @@ onBeforeUnmount(() => {
       :back-label="t('skills.back_to_chat')"
       :chat-actions="currentView === 'chat'"
       :session-id="currentSessionId || undefined"
+      :user-id="getUserId() || undefined"
+      :main-id="getMainId()"
+      :auth-token="authToken"
+      :members-revision="currentSessionId ? chatRuntime.membersRevisionFor(currentSessionId) : undefined"
+      @session-left="handleSessionLeft"
       :workspace="activeCodeState.workspace"
       :show-workspace-context="activeChatHasMessages"
       :workspace-branch="desktopWorkspaceSummary?.branch || activeCodeState.session?.git_branch || activeCodeState.workspace?.git_branch || ''"
@@ -3106,6 +3124,7 @@ onBeforeUnmount(() => {
               :code-workspace-busy="codeRuntime.stateFor(pane.key).busy"
               :code-worktree="codeRuntime.stateFor(pane.key).worktree"
               :code-source-ref="codeRuntime.stateFor(pane.key).sourceRef"
+              :code-permission-mode="codeRuntime.stateFor(pane.key).permissionMode"
               :code-history-read-only="pane.executionLocation !== 'server' && !codeRuntime.stateFor(pane.key).session"
               :code-history-restoring="codeRuntime.stateFor(pane.key).restoring"
               :code-history-location="pane.executionLocation === 'server' ? undefined : pane.executionLocation"
@@ -3135,6 +3154,7 @@ onBeforeUnmount(() => {
               @code-worktree="(enabled) => codeRuntime.setWorktree(pane.key, enabled)"
               @start-local-code-task="createProject"
               @code-source-ref="(fullRef) => codeRuntime.setSourceRef(pane.key, fullRef)"
+              @code-permission-mode="(mode) => codeRuntime.setPermissionMode(pane.key, mode)"
               @code-branch-updated="(branch) => codeRuntime.setWorkspaceBranch(pane.key, branch)"
               @code-approval="(approvalId, decision, scope) => codeRuntime.decide(pane.key, approvalId, decision, scope)"
               @close-code-panel="hideDesktopTools"
@@ -3457,6 +3477,11 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
+  <SessionSnapshotViewer
+    v-if="pendingSnapshotToken && authToken && userProfile"
+    :token="pendingSnapshotToken"
+    @close="pendingSnapshotToken = null"
+  />
   </n-dialog-provider>
   </n-notification-provider>
   </n-message-provider>

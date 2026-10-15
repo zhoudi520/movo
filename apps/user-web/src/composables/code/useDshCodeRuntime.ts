@@ -13,7 +13,7 @@ import {
   subscribeDshCodeEvents,
   unsubscribeDshCodeEvents,
 } from '../../platform'
-import type { DshCodeSession, DshExecutionEvent, DshPendingApproval, DshWorkspace } from '../../platform/types'
+import type { CodePermissionMode, DshCodeSession, DshExecutionEvent, DshPendingApproval, DshWorkspace } from '../../platform/types'
 import type { ExternalTurnHandle } from '../useChatRuntimeStore'
 import { getLocale } from '../i18n'
 import { codeRuntimeErrorMessage } from './codeRuntimeErrors'
@@ -26,6 +26,7 @@ export type CodePaneState = {
   session: DshCodeSession | null
   worktree: boolean
   sourceRef: string
+  permissionMode: CodePermissionMode
   busy: boolean
   restoring: boolean
   stopping: boolean
@@ -42,7 +43,7 @@ type ChatRuntimeBoundary = {
 
 function draftState(): CodePaneState {
   return reactive({
-    draftId: createClientUuid(), workspace: null, session: null, worktree: false, sourceRef: '',
+    draftId: createClientUuid(), workspace: null, session: null, worktree: false, sourceRef: '', permissionMode: 'ask',
     busy: false, restoring: false, stopping: false, error: '', cursor: -1, events: [], approvals: [], approvalBusy: {},
   })
 }
@@ -138,6 +139,13 @@ export function useDshCodeRuntime(chat: ChatRuntimeBoundary) {
     state.sourceRef = sourceRef || 'HEAD'
   }
 
+  function setPermissionMode(key: string, mode: CodePermissionMode) {
+    if (!['ask', 'auto', 'full', 'custom'].includes(mode)) throw new Error('Unsupported Code permission mode')
+    const state = stateFor(key)
+    if (state.busy) throw new Error('Cannot change Code permissions during an active turn')
+    state.permissionMode = mode
+  }
+
   function setWorkspaceBranch(key: string, branch: string) {
     const state = stateFor(key)
     if (!state.workspace) return
@@ -161,6 +169,7 @@ export function useDshCodeRuntime(chat: ChatRuntimeBoundary) {
     target.workspace = inherited.workspace
     target.worktree = inherited.worktree
     target.sourceRef = inherited.sourceRef
+    target.permissionMode = stateFor(fromKey).permissionMode
     return true
   }
 
@@ -171,6 +180,7 @@ export function useDshCodeRuntime(chat: ChatRuntimeBoundary) {
     target.workspace = source.workspace
     target.worktree = source.worktree
     target.sourceRef = source.sourceRef
+    target.permissionMode = source.permissionMode
     source.workspace = null
     source.sourceRef = ''
     source.error = ''
@@ -204,6 +214,7 @@ export function useDshCodeRuntime(chat: ChatRuntimeBoundary) {
         state.session = await createDshCodeSession(
           workspace.workspace_id, state.draftId, text.trim().slice(0, 120) || 'Code task', modelId, state.worktree,
           state.sourceRef || 'HEAD',
+          state.permissionMode,
         )
       }
       const sessionId = state.session.kernel_session_id
@@ -211,7 +222,7 @@ export function useDshCodeRuntime(chat: ChatRuntimeBoundary) {
       if (!conversationId) throw new Error('desktop Code Session was not committed to MOVO history')
       await ensureSubscribed(state)
       turns.set(sessionId, chat.beginExternalTurn(key, text, conversationId))
-      const sent = await sendDshCodeTurn(sessionId, text)
+      const sent = await sendDshCodeTurn(sessionId, text, state.permissionMode)
       turns.get(sessionId)?.bindMessageId(sent.messageId)
       await refreshApprovals(state)
       return true
@@ -295,5 +306,5 @@ export function useDshCodeRuntime(chat: ChatRuntimeBoundary) {
     for (const sessionId of subscribed) void unsubscribeDshCodeEvents(sessionId)
   })
 
-  return { stateFor, beginRestore, finishRestore, attach, clear, setWorktree, setSourceRef, setWorkspaceBranch, setDraftProject, inheritDraftProject, transferDraft, send, stop, decide, needsAssistance, activeSessions, reset }
+  return { stateFor, beginRestore, finishRestore, attach, clear, setWorktree, setSourceRef, setPermissionMode, setWorkspaceBranch, setDraftProject, inheritDraftProject, transferDraft, send, stop, decide, needsAssistance, activeSessions, reset }
 }

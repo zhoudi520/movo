@@ -221,6 +221,7 @@ class Settings(BaseSettings):
     STORAGE_BACKEND: str = "local"
     LOCAL_STORAGE_PATH: str = "storage"
     FILE_PUBLIC_BASE_URL: str = ""
+    USER_PORTAL_BASE_URL: str = ""
     FILE_PUBLIC_PATH_PREFIX: str = "/askai-api/api/files"
     BACKEND_INTERNAL_BASE_URL: str = "http://127.0.0.1:8000"
     OSS_ACCESS_KEY_ID: str = ""

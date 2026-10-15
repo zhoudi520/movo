@@ -1,4 +1,5 @@
 // Shared types for the platform adapter layer.
+export type CodePermissionMode = 'ask' | 'auto' | 'full' | 'custom'
 
 export interface AgentStatus {
   running: boolean

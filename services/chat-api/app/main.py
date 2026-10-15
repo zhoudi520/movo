@@ -132,6 +132,7 @@ from app.api.endpoints import (
     skill_share_direct,
     skill_shares,
     session_shares,
+    session_snapshots,
     session_live,
     resource_feedback,
     personal_knowledge,
@@ -163,6 +164,7 @@ app.include_router(skill_updates.router, prefix="/api")
 app.include_router(skill_share_direct.router, prefix="/api")
 app.include_router(skill_shares.router, prefix="/api")
 app.include_router(session_shares.router, prefix="/api")
+app.include_router(session_snapshots.router, prefix="/api")
 app.include_router(session_live.router, prefix="/api")
 app.include_router(resource_feedback.router, prefix="/api")
 app.include_router(personal_knowledge.router, prefix="/api")
@@ -247,6 +249,8 @@ async def startup_event() -> None:
     await ConversationRepository(db).ensure_indexes()
     await SessionParticipantsRepository(db).ensure_indexes()
     await db.chat_messages.create_index([("main_id", 1), ("user_id", 1), ("session_id", 1), ("seq", 1)])
+    await db.session_history_snapshots.create_index([("main_id", 1), ("token_hash", 1)], unique=True)
+    await db.session_history_snapshots.create_index([("main_id", 1), ("owner_user_id", 1), ("session_id", 1)])
     await db.execution_logs.create_index([("main_id", 1), ("session_id", 1), ("message_id", 1)])
     await db.user_skills.create_index([("main_id", 1), ("user_id", 1), ("created_at", -1)])
     await db.user_skills.create_index(

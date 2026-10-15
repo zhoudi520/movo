@@ -9,7 +9,10 @@ import urllib.error
 from unittest import TestCase
 from unittest.mock import patch
 
+from bson import ObjectId
+
 from app.services.embedding_provider import _model_center_embed_texts
+from app.services.model_center_runtime import resolve_model_instance
 from app.services.reranker_provider import _model_center_rerank
 from app.services.secret_codec import decrypt_admin_secret
 
@@ -29,6 +32,51 @@ class _Response:
 
 
 class ModelProviderTests(TestCase):
+    def test_grouped_model_uses_group_connection_settings(self) -> None:
+        instance_id = ObjectId()
+        group_id = ObjectId()
+        provider_id = ObjectId()
+
+        class Collection:
+            def __init__(self, document: dict) -> None:
+                self.document = document
+
+            def find_one(self, query: dict) -> dict:
+                return self.document
+
+        database = {
+            "admin_model_instances": Collection(
+                {
+                    "_id": instance_id,
+                    "main_id": "tenant",
+                    "provider_id": provider_id,
+                    "group_id": str(group_id),
+                    "capabilities": ["embedding"],
+                    "api_key_encrypted": "old-key",
+                    "base_url": "https://old.example/v1",
+                    "model_name": "embedding-model",
+                }
+            ),
+            "admin_model_providers": Collection({"provider_type": "openai_compatible"}),
+            "admin_model_groups": Collection(
+                {
+                    "_id": group_id,
+                    "provider_id": provider_id,
+                    "api_key_encrypted": "group-key",
+                    "base_url": "https://group.example/v1/",
+                    "api_version": "2026-01-01",
+                }
+            ),
+        }
+        with (
+            patch("app.services.model_center_runtime.get_db", return_value=database),
+            patch("app.services.model_center_runtime.decrypt_admin_secret", side_effect=lambda key: key),
+        ):
+            result = resolve_model_instance("tenant", str(instance_id), "embedding")
+        self.assertEqual("group-key", result["apiKey"])
+        self.assertEqual("https://group.example/v1", result["baseUrl"])
+        self.assertEqual("embedding-model", result["modelName"])
+
     def test_embedding_uses_openai_compatible_endpoint(self) -> None:
         runtime = {
             "providerType": "openai_compatible",

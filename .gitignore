@@ -109,6 +109,9 @@ ppt/
 !.github/workflows/dsh-upgrade-candidate.yml
 !.github/workflows/container-release.yml
 !.github/workflows/container-promote.yml
+!.github/security/
+.github/security/*
+!.github/security/document-parser.trivyignore.yaml
 !.github/ISSUE_TEMPLATE/
 !.github/ISSUE_TEMPLATE/*
 !.github/pull_request_template.md

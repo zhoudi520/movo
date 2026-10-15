@@ -13,7 +13,7 @@ import datetime
 from typing import Any, Literal
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.api.principal import ApiPrincipal, require_end_user_principal
@@ -29,6 +29,7 @@ from app.services.session_sharing.service import (
     issue_share,
     revoke_share,
 )
+from app.services.session_sharing.links import portal_link
 
 
 router = APIRouter(dependencies=[Depends(require_end_user_principal)])
@@ -87,6 +88,7 @@ async def _resolve_viewer_session(
 async def create_session_share(
     session_id: str,
     payload: CreateShareRequest,
+    request: Request = None,
     principal: ApiPrincipal = Depends(require_end_user_principal),
 ) -> dict[str, object]:
     db = get_db()
@@ -113,6 +115,7 @@ async def create_session_share(
             detail={"code": "session_share_not_server", "message": "Only server-run sessions can be shared"},
         )
     issued = issue_share(session_doc, now=_utcnow(), expires_in_days=payload.expires_in_days)
+    link = portal_link(request, issued["token"]) if request is not None else ""
     await db.chat_sessions.update_one({"_id": session_doc["_id"]}, {"$set": issued["fields"]})
     active_rows = await participants.list(str(session_doc["_id"]), tenant_id=principal.main_id)
     participant_count = sum(
@@ -120,6 +123,7 @@ async def create_session_share(
     )
     return _response({
         "token": issued["token"],
+        "url": link,
         "expires_at": issued["fields"]["share_expires_at"],
         "participant_count": participant_count,
     })

@@ -5,6 +5,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { scopeOf } from '@deepseek-ai/dsh-scope'
 import { assembleContextFor } from '@deepseek-ai/dsh-agent'
+import { setApprovalPolicy } from '@deepseek-ai/dsh-user-approval'
 
 import * as DeterministicModelPlugin from './deterministic-model-plugin.mjs'
 import { AskaiModelGatewayAdapter } from './askai-model-gateway-plugin.mjs'
@@ -31,6 +32,8 @@ import { capabilityToolContracts, modelToolContracts } from './official-host/too
 import { DshWorkspaceService } from './workspace-service.mjs'
 import { cancelSessionWork } from './session-cancellation.mjs'
 import { DesktopApprovalBroker } from './desktop-approval-broker.mjs'
+import { CodeApprovalReviewer } from './code-approval-reviewer.mjs'
+import { codePermissionPolicy } from './code-permission-policy.mjs'
 import { registerAskaiSkillProvider } from './askai-skill-provider.mjs'
 import { invokeSelectedSkill, resolveSkillTurnContext } from './skill-turn-selection.mjs'
 import { SkillInvocationTracker } from './skill-invocation-tracker.mjs'
@@ -105,14 +108,15 @@ export class KernelRuntime {
       })
       this.#webSearchDispose = ctx.web.registerSearchProvider(this.#webSearchProvider)
     }
-    this.#desktopApprovals = new DesktopApprovalBroker(ctx, {
-      excludedTools: enterpriseToolNames(this.modelProfile),
-    })
     if (this.modelProfile === undefined) await ctx.plugin(DeterministicModelPlugin)
     else {
       this.#modelAdapter = new AskaiModelGatewayAdapter(this.modelProfile)
       this.#modelAdapterDispose = ctx.llm.registerAdapter(['askai-model-gateway'], this.#modelAdapter)
     }
+    this.#desktopApprovals = new DesktopApprovalBroker(ctx, {
+      excludedTools: enterpriseToolNames(this.modelProfile),
+      automaticReviewer: new CodeApprovalReviewer(this.#modelAdapter, this.modelProfile),
+    })
     if (this.modelProfile?.toolProfile !== undefined) {
       this.#toolBridge = new AskaiToolBridge(ctx, {
         ...this.modelProfile.toolProfile,
@@ -144,7 +148,7 @@ export class KernelRuntime {
 
   async createSession({
     sessionId, cwd, workspaceId, presetId = ASKAI_ENTERPRISE_PRESET_ID,
-    permissionPreset, seed, parentSessionId,
+    permissionPreset, approvalReviewer, approvalPolicy, seed, parentSessionId,
   }) {
     this.#assertStarted()
     if (this.#handles.has(sessionId)) throw new Error(`session already live: ${sessionId}`)
@@ -167,7 +171,12 @@ export class KernelRuntime {
     })
     this.#handles.set(sessionId, handle)
     try {
-      if (permissionPreset !== undefined) this.#ctx.permissionPresets.set(handle.agent.session, permissionPreset)
+      if (presetId === 'code') {
+        const policy = codePermissionPolicy({ permissionPreset, approvalReviewer, approvalPolicy })
+        this.#ctx.permissionPresets.set(handle.agent.session, policy.permissionPreset)
+        setApprovalPolicy(handle.agent.session, policy.approvalPolicy)
+        this.#desktopApprovals.setReviewer(sessionId, policy.approvalReviewer)
+      } else if (permissionPreset !== undefined) this.#ctx.permissionPresets.set(handle.agent.session, permissionPreset)
       if (workspace !== undefined) await this.#workspaces.attachSession(workspace.id, sessionId)
       return await this.describeSession(handle.agent)
     } catch (error) {
@@ -203,8 +212,14 @@ export class KernelRuntime {
     return await this.describeSession(handle.agent)
   }
 
-  send({ sessionId, mode, content, temporalContext, turnContext }) {
+  send({ sessionId, mode, content, temporalContext, turnContext, permissionPreset, approvalReviewer, approvalPolicy }) {
     const agent = this.#requireAgent(sessionId)
+    if (agent.session?.header?.agentPreset === 'code' && (permissionPreset !== undefined || approvalReviewer !== undefined || approvalPolicy !== undefined)) {
+      const policy = codePermissionPolicy({ permissionPreset, approvalReviewer, approvalPolicy })
+      this.#ctx.permissionPresets.set(agent.session, policy.permissionPreset)
+      this.#ctx.approval.setPolicy(agent, policy.approvalPolicy)
+      this.#desktopApprovals.setReviewer(sessionId, policy.approvalReviewer)
+    }
     if (temporalContext === undefined || temporalContext === null) {
       throw new TypeError('temporalContext is required for every MOVO turn')
     }
