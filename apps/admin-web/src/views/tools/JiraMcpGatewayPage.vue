@@ -98,6 +98,11 @@ import {
 } from '@/api/jira-mcp-gateway';
 import { t } from '@/composables/i18n';
 
+const defaultEndpointPresets: Record<McpEndpointPreset, string> = {
+  docker_internal: 'http://jira-mcp-gateway:8766/mcp',
+  host_loopback: 'http://127.0.0.1:8766/mcp',
+};
+
 const router = useRouter();
 const message = useMessage();
 
@@ -133,7 +138,7 @@ const form = reactive({
 });
 
 const resolvedEndpoint = computed(() => {
-  const presets = settings.endpointPresets || {};
+  const presets = settings.endpointPresets ?? defaultEndpointPresets;
   return presets[form.mcpToolEndpointPreset] || settings.resolvedMcpEndpoint;
 });
 

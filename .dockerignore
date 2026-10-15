@@ -27,3 +27,10 @@ backend/static/reports/
 backend/storage/*
 tmp/
 temp/
+
+# document-parser image build uses repo root context; skip bulky offline base image tarballs
+docker_base_images/*-img.tar.gz
+
+# Gitignored Docling blobs must still be sent to the daemon (BuildKit honors .gitignore).
+!docker_base_images/offline-docling-models/
+!docker_base_images/offline-docling-models/**/*

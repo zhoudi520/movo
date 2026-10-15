@@ -1,0 +1,16 @@
+# Overlay for document-parser builds without Hugging Face network access.
+# Prepare models under docker_base_images/offline-docling-models/ first.
+# See services/document-parser/OFFLINE_DOCLING.md
+
+services:
+  document-api:
+    build:
+      args:
+        MOVO_DOCLING_MODELS_SOURCE: context
+        INSTALL_DOCLING_MODELS_AT_BUILD: "false"
+
+  document-worker:
+    build:
+      args:
+        MOVO_DOCLING_MODELS_SOURCE: context
+        INSTALL_DOCLING_MODELS_AT_BUILD: "false"

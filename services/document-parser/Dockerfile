@@ -24,7 +24,7 @@ ARG PYTORCH_CUDA_INDEX_URL=
 ARG MOVO_APT_MIRROR=
 ARG MOVO_APT_SECURITY_MIRROR=
 ARG MOVO_PYPI_INDEX_URL=
-COPY scripts /tmp/document-parser-scripts
+COPY services/document-parser/scripts /tmp/document-parser-scripts
 RUN if [ -n "${MOVO_APT_MIRROR}" ]; then \
         for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
             if [ -f "${source_file}" ]; then \
@@ -61,8 +61,8 @@ RUN if [ "${INSTALL_SYSTEM_DEPS_AT_BUILD}" = "true" ]; then \
         echo "Skip apt system dependencies in build stage (INSTALL_SYSTEM_DEPS_AT_BUILD=false)"; \
     fi
 
-COPY requirements.txt /tmp/requirements.txt
-COPY requirements-docling.txt /tmp/requirements-docling.txt
+COPY services/document-parser/requirements.txt /tmp/requirements.txt
+COPY services/document-parser/requirements-docling.txt /tmp/requirements-docling.txt
 
 ARG PYTORCH_CPU_FIND_LINKS=
 RUN if [ "${INSTALL_PYTHON_DEPS_AT_BUILD}" = "true" ]; then \
@@ -91,17 +91,27 @@ RUN if [ "${INSTALL_PYTHON_DEPS_AT_BUILD}" = "true" ]; then \
     && python -c "from docling.document_converter import DocumentConverter; print('docling ok')" \
     && python -c "import torch; print(f'torch {torch.__version__}, cuda_available={torch.cuda.is_available()}, cuda={torch.version.cuda}')"
 
+# download: fetch models during build (needs Hugging Face or MOVO_HF_ENDPOINT mirror).
+# context: copy from docker_base_images/offline-docling-models (build context = repo root).
+ARG MOVO_DOCLING_MODELS_SOURCE=download
 ARG INSTALL_DOCLING_MODELS_AT_BUILD=true
 ARG MOVO_HF_ENDPOINT=
 ARG MOVO_HF_TIMEOUT=120
-RUN if [ "${INSTALL_DOCLING_MODELS_AT_BUILD}" = "true" ]; then \
+COPY docker_base_images/offline-docling-models/ /tmp/offline-docling-models/
+RUN mkdir -p "${DOCLING_ARTIFACTS_PATH}" \
+    && if [ "${MOVO_DOCLING_MODELS_SOURCE}" = "context" ]; then \
+        echo "Install Docling models from docker_base_images/offline-docling-models"; \
+        cp -a /tmp/offline-docling-models/. "${DOCLING_ARTIFACTS_PATH}/"; \
+        HF_HUB_OFFLINE=1 python /tmp/document-parser-scripts/verify_docling_runtime.py; \
+    elif [ "${INSTALL_DOCLING_MODELS_AT_BUILD}" = "true" ]; then \
         if [ -n "${MOVO_HF_ENDPOINT}" ]; then export HF_ENDPOINT="${MOVO_HF_ENDPOINT}"; fi; \
         HF_HUB_DISABLE_XET=1 HF_HUB_ETAG_TIMEOUT="${MOVO_HF_TIMEOUT}" HF_HUB_DOWNLOAD_TIMEOUT="${MOVO_HF_TIMEOUT}" \
             python /tmp/document-parser-scripts/download_docling_models.py \
         && HF_HUB_OFFLINE=1 python /tmp/document-parser-scripts/verify_docling_runtime.py; \
     else \
         echo "Skip Docling model download and verification (INSTALL_DOCLING_MODELS_AT_BUILD=false)"; \
-    fi
+    fi \
+    && rm -rf /tmp/offline-docling-models
 
 ARG MOVO_SECURITY_REFRESH=local
 RUN test -n "${MOVO_SECURITY_REFRESH}" \
@@ -111,11 +121,11 @@ RUN test -n "${MOVO_SECURITY_REFRESH}" \
 
 ENV HF_HUB_OFFLINE=1
 
-COPY entrypoint.sh /app/entrypoint.sh
+COPY services/document-parser/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-COPY app /app/app
-COPY .env.example /app/.env.example
+COPY services/document-parser/app /app/app
+COPY services/document-parser/.env.example /app/.env.example
 
 EXPOSE 8200
 
