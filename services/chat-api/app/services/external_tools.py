@@ -152,6 +152,20 @@ def _merged_tool_state(existing: Dict[str, Any] | None, patch: Dict[str, Any]) -
 
 
 class ExternalToolService:
+    @staticmethod
+    def _mcp_runtime_headers(main_id: str, actor_user_id: str = "") -> Dict[str, str]:
+        """Build trusted tenant/user headers for MCP calls (e.g. Jira MCP gateway)."""
+        resolved = resolve_main_id(main_id)
+        headers = {
+            "X-MOVO-Main-ID": resolved,
+            "X-AskAI-Main-ID": resolved,
+        }
+        user_id = str(actor_user_id or "").strip()
+        if user_id:
+            headers["X-MOVO-User-ID"] = user_id
+            headers["X-AskAI-User-ID"] = user_id
+        return headers
+
     async def ensure_indexes(self) -> None:
         db = get_db()
         await db.external_tools.create_index([("main_id", 1), ("updated_at", -1)])
@@ -317,7 +331,12 @@ class ExternalToolService:
         started = time.monotonic()
         try:
             if tool["type"] == "mcp":
-                result = await self._test_mcp(tool, test_input)
+                result = await self._test_mcp(
+                    tool,
+                    test_input,
+                    main_id=main_id,
+                    actor_user_id=owner_user_id,
+                )
             else:
                 result = await self._test_http(tool, test_input)
             logger.info(
@@ -380,7 +399,7 @@ class ExternalToolService:
                 _short_text(test_input, 5000),
             )
             if tool["type"] == "mcp":
-                result = await self._test_mcp(tool, test_input)
+                result = await self._test_mcp(tool, test_input, main_id=main_id)
             else:
                 result = await self._test_http(tool, test_input)
             result["durationMs"] = int((time.monotonic() - started) * 1000)
@@ -418,7 +437,12 @@ class ExternalToolService:
             raise ValueError("工具连接不存在")
         if tool["type"] != "mcp":
             raise ValueError("只有 MCP 服务支持发现 tools")
-        result = await self._mcp_jsonrpc(tool, "tools/list", {})
+        result = await self._mcp_jsonrpc(
+            tool,
+            "tools/list",
+            {},
+            runtime_headers=self._mcp_runtime_headers(main_id, owner_user_id),
+        )
         tools = result.get("tools") if isinstance(result, dict) else []
         normalized = []
         for item in _safe_list(tools):
@@ -499,12 +523,7 @@ class ExternalToolService:
                 tool,
                 "tools/call",
                 {"name": tool_name, "arguments": args},
-                runtime_headers={
-                    "X-MOVO-Main-ID": resolve_main_id(main_id),
-                    "X-MOVO-User-ID": str(actor_user_id or "").strip(),
-                    "X-AskAI-Main-ID": resolve_main_id(main_id),
-                    "X-AskAI-User-ID": str(actor_user_id or "").strip(),
-                },
+                runtime_headers=self._mcp_runtime_headers(main_id, str(actor_user_id or "")),
             )
             outcome = build_mcp_call_outcome(tool_name, result)
             outcome["durationMs"] = int((time.monotonic() - started) * 1000)
@@ -920,10 +939,18 @@ class ExternalToolService:
             "resolvedGatewayPath": resolved_gateway_path,
         }
 
-    async def _test_mcp(self, tool: Dict[str, Any], test_input: Dict[str, Any]) -> Dict[str, Any]:
+    async def _test_mcp(
+        self,
+        tool: Dict[str, Any],
+        test_input: Dict[str, Any],
+        *,
+        main_id: str = "default",
+        actor_user_id: str = "",
+    ) -> Dict[str, Any]:
+        runtime_headers = self._mcp_runtime_headers(main_id, actor_user_id)
         tool_name = str(test_input.get("toolName") or "").strip()
         if not tool_name:
-            discovered = await self._mcp_jsonrpc(tool, "tools/list", {})
+            discovered = await self._mcp_jsonrpc(tool, "tools/list", {}, runtime_headers=runtime_headers)
             tools = _safe_list(discovered.get("tools") if isinstance(discovered, dict) else [])
             return {
                 "success": True,
@@ -932,7 +959,12 @@ class ExternalToolService:
                 "responseSummary": _short_text(discovered),
                 "raw": discovered,
             }
-        result = await self._mcp_jsonrpc(tool, "tools/call", {"name": tool_name, "arguments": _safe_dict(test_input.get("arguments"))})
+        result = await self._mcp_jsonrpc(
+            tool,
+            "tools/call",
+            {"name": tool_name, "arguments": _safe_dict(test_input.get("arguments"))},
+            runtime_headers=runtime_headers,
+        )
         return build_mcp_call_outcome(tool_name, result)
 
     async def _mcp_jsonrpc(

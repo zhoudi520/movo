@@ -110,9 +110,6 @@ async def test_jira_mcp_gateway_mcp(
     doc = await load_settings_doc(main_id) or {}
     from app.services.jira_mcp_gateway import _decrypt_field, _endpoint_for_preset
 
-    gateway_key = payload.gatewayKey.strip() or _decrypt_field(doc, "gateway_key_encrypted")
-    if not gateway_key:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先保存或填写网关密钥")
     endpoint = _endpoint_for_preset(str(doc.get("mcp_tool_endpoint_preset") or "docker_internal"))
     body = json.dumps(
         {
@@ -130,7 +127,6 @@ async def test_jira_mcp_gateway_mcp(
         endpoint,
         data=body,
         headers={
-            "Authorization": f"Bearer {gateway_key}",
             "Accept": "application/json, text/event-stream",
             "Content-Type": "application/json",
             "MCP-Protocol-Version": "2025-06-18",

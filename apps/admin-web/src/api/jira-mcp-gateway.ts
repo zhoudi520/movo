@@ -6,7 +6,7 @@ export interface JiraMcpGatewaySettings {
   mainId: string;
   enabled: boolean;
   jiraBaseUrl: string;
-  personalAccessTokenMasked: string;
+  personalAccessToken: string;
   gatewayKeyMasked: string;
   configVersion: number;
   mcpToolEndpointPreset: McpEndpointPreset;

@@ -5,7 +5,9 @@
         <div class="page-header">
           <div>
             <div class="page-title">{{ t('Jira MCP 网关') }}</div>
-            <div class="page-subtitle">{{ t('配置 Jira 凭证与网关密钥，保存后约 15 秒内自动生效（无需重启容器）。') }}</div>
+            <div class="page-subtitle">
+              {{ t('配置企业默认 Jira；MCP 网关无需 Bearer，由 MOVO 注入租户与用户头。保存后约 15 秒内生效。') }}
+            </div>
           </div>
           <n-space>
             <n-button @click="router.push({ name: 'Tools' })">{{ t('返回工具列表') }}</n-button>
@@ -26,21 +28,8 @@
             <n-form-item-gi :span="2" :label="t('Jira 凭证（邮箱:API Token）')">
               <n-input
                 v-model:value="form.personalAccessToken"
-                type="password"
-                show-password-on="click"
-                :placeholder="settings.personalAccessTokenMasked ? t('留空表示不修改') : t('user@company.com:ATATT...')"
+                placeholder="user@company.com:ATATT..."
               />
-            </n-form-item-gi>
-            <n-form-item-gi :span="2" :label="t('网关密钥（Bearer）')">
-              <n-input-group>
-                <n-input
-                  v-model:value="form.gatewayKey"
-                  type="password"
-                  show-password-on="click"
-                  :placeholder="settings.gatewayKeyMasked ? t('留空表示不修改或自动生成') : t('保存时可自动生成')"
-                />
-                <n-button @click="generateGatewayKey">{{ t('生成') }}</n-button>
-              </n-input-group>
             </n-form-item-gi>
             <n-form-item-gi :span="2" :label="t('MOVO 访问网关方式')">
               <n-radio-group v-model:value="form.mcpToolEndpointPreset">
@@ -80,7 +69,6 @@ import {
   NFormItemGi,
   NGrid,
   NInput,
-  NInputGroup,
   NRadio,
   NRadioGroup,
   NSpace,
@@ -115,7 +103,7 @@ const settings = reactive<JiraMcpGatewaySettings>({
   mainId: 'default',
   enabled: true,
   jiraBaseUrl: '',
-  personalAccessTokenMasked: '',
+  personalAccessToken: '',
   gatewayKeyMasked: '',
   configVersion: 0,
   mcpToolEndpointPreset: 'docker_internal',
@@ -148,7 +136,7 @@ function applySettings(data: JiraMcpGatewaySettings) {
   form.jiraBaseUrl = data.jiraBaseUrl;
   form.mcpToolEndpointPreset = data.mcpToolEndpointPreset || 'docker_internal';
   form.linkedToolId = data.linkedToolId || '';
-  form.personalAccessToken = '';
+  form.personalAccessToken = data.personalAccessToken || '';
   form.gatewayKey = '';
 }
 
@@ -163,11 +151,6 @@ async function load() {
   }
 }
 
-function generateGatewayKey() {
-  const bytes = crypto.getRandomValues(new Uint8Array(24));
-  form.gatewayKey = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
 async function save() {
   saving.value = true;
   try {
@@ -175,7 +158,7 @@ async function save() {
       enabled: form.enabled,
       jiraBaseUrl: form.jiraBaseUrl.trim(),
       personalAccessToken: form.personalAccessToken.trim(),
-      gatewayKey: form.gatewayKey.trim(),
+      gatewayKey: '',
       mcpToolEndpointPreset: form.mcpToolEndpointPreset,
     });
     applySettings(saved);
@@ -205,7 +188,7 @@ async function testJira() {
 async function testMcp() {
   testingMcp.value = true;
   try {
-    await testJiraMcpGatewayMcp({ gatewayKey: form.gatewayKey.trim() });
+    await testJiraMcpGatewayMcp({});
     message.success(t('MCP 网关连接成功'));
   } catch (error: any) {
     message.error(error?.response?.data?.detail || error?.message || t('MCP 测试失败'));

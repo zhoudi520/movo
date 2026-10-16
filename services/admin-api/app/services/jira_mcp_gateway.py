@@ -42,13 +42,13 @@ async def load_settings_doc(main_id: str) -> dict[str, Any] | None:
 
 
 def serialize_public(doc: dict[str, Any] | None) -> dict[str, Any]:
-    """Serialize gateway settings for admin UI (no plaintext secrets)."""
+    """Serialize gateway settings for admin UI (Jira token in plaintext for editing)."""
     row = doc or {}
     return {
         "mainId": str(row.get("main_id") or "default"),
         "enabled": bool(row.get("enabled", False)),
         "jiraBaseUrl": str(row.get("jira_base_url") or ""),
-        "personalAccessTokenMasked": str(row.get("personal_access_token_masked") or ""),
+        "personalAccessToken": _decrypt_field(row, "personal_access_token_encrypted") if row else "",
         "gatewayKeyMasked": str(row.get("gateway_key_masked") or ""),
         "configVersion": int(row.get("config_version") or 0),
         "mcpToolEndpointPreset": str(row.get("mcp_tool_endpoint_preset") or "docker_internal"),
@@ -161,8 +161,8 @@ async def _sync_linked_external_tool(
     """Create or update organization MCP tool pointing at the shared gateway URL."""
     config_patch = {
         "endpoint": endpoint,
-        "authType": "bearer",
-        "authToken": gateway_key,
+        "authType": "none",
+        "authToken": "",
         "headers": {},
         "timeoutSeconds": 45,
     }
