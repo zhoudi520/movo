@@ -333,7 +333,8 @@ services:
       retries: 20
 
   jira-mcp-gateway:
-    profiles: ["jira-mcp"]
+    image: ${MOVO_IMAGE_PREFIX:-ghcr.io/himovo/movo}-jira-mcp-gateway:${MOVO_VERSION:-latest}
+    pull_policy: ${MOVO_PULL_POLICY:-missing}
     build: ./services/jira-mcp-gateway
     restart: unless-stopped
     environment:

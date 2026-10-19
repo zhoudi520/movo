@@ -1,0 +1,77 @@
+# Bind-mount application source for local iteration without rebuilding images.
+#
+# Python APIs use uvicorn --reload (save file → process reloads; no container restart).
+# DSH / Jira MCP: mount source only — restart the service after edits.
+# document-worker (Celery): mount app — restart document-worker after Python edits.
+#
+# Frontend (admin-web / user-web) images serve pre-built dist via nginx; use host dev instead:
+#   ./dev.sh
+# or loopback ports from docker-compose.host-deps.yml + Vite on the host.
+#
+# Examples:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml \
+#     -f docker-compose.host-deps.yml -f docker-compose.dev-mount.yml up -d
+#
+#   docker compose -f docker-compose.yml -f docker-compose.host-deps.yml \
+#     -f docker-compose.dev-mount.yml up -d admin-api chat-api
+#
+# Rebuild images when requirements.txt / package.json / Dockerfile args change.
+
+services:
+  chat-api:
+    volumes:
+      - ./services/chat-api/app:/app/app:ro
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --proxy-headers
+      - --reload
+      - --reload-dir
+      - /app/app
+
+  admin-api:
+    volumes:
+      - ./services/admin-api/app:/app/app:ro
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8100"
+      - --proxy-headers
+      - --reload
+      - --reload-dir
+      - /app/app
+
+  document-api:
+    volumes:
+      - ./services/document-parser/app:/app/app:ro
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8200"
+      - --proxy-headers
+      - --reload
+      - --reload-dir
+      - /app/app
+
+  document-worker:
+    volumes:
+      - ./services/document-parser/app:/app/app:ro
+
+  dsh-runtime-host:
+    volumes:
+      - ./services/chat-api/dsh/runtime-host/src:/app/src:ro
+      - ./services/chat-api/dsh/runtime-host/config:/app/config:ro
+
+  jira-mcp-gateway:
+    volumes:
+      - ./services/jira-mcp-gateway/server.mjs:/app/server.mjs:ro

@@ -9,7 +9,7 @@
 #   docker compose -f docker-compose.yml -f docker-compose.host-deps.yml up -d bootstrap mongo redis weaviate dsh-runtime-host
 #
 # Optional Jira MCP gateway (host chat-api uses http://127.0.0.1:8766/mcp):
-#   docker compose -f docker-compose.yml -f docker-compose.host-deps.yml --profile jira-mcp up -d jira-mcp-gateway
+#   docker compose -f docker-compose.yml -f docker-compose.host-deps.yml up -d jira-mcp-gateway
 #
 # Full stack in Docker with loopback ports (e.g. host Vite + container APIs):
 #   docker compose -f docker-compose.yml -f docker-compose.build.yml -f docker-compose.host-deps.yml up -d

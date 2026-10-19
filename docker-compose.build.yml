@@ -24,8 +24,8 @@ services:
   document-api:
     pull_policy: build
     build: &document-build
-      context: ./services/document-parser
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/document-parser/Dockerfile
       args:
         INSTALL_SYSTEM_DEPS_AT_BUILD: "true"
         INSTALL_PYTHON_DEPS_AT_BUILD: "true"
@@ -58,3 +58,9 @@ services:
     build:
       context: ./deploy/docker
       dockerfile: gateway.Dockerfile
+
+  jira-mcp-gateway:
+    pull_policy: build
+    build:
+      context: ./services/jira-mcp-gateway
+      dockerfile: Dockerfile
