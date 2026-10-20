@@ -809,6 +809,7 @@ class RuntimeParseService:
 
         vision_payload = await vision_service.describe_images_with_facts(user_text=user_text, images=images, output_spec=output_spec)
         vision_summary = str(vision_payload.get("summary") or "").strip()
+        vision_error = str(vision_payload.get("error") or "").strip()
         image_facts = vision_payload.get("facts") if isinstance(vision_payload.get("facts"), dict) else {}
         uploaded_assets = build_uploaded_image_assets(images=images, image_facts=image_facts or {})
         for idx, asset in enumerate(uploaded_assets):
@@ -833,6 +834,7 @@ class RuntimeParseService:
         output_spec["multimodal"] = multimodal
         return {
             "vision_summary": vision_summary,
+            "vision_error": vision_error,
             "image_facts": image_facts or {},
             "uploaded_assets": uploaded_assets,
             "multimodal": multimodal,

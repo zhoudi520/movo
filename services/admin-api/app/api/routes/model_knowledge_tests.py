@@ -14,6 +14,7 @@ from app.services.model_knowledge_connectivity import (
     ModelKnowledgeConnectivityError,
     run_saved_knowledge_model_test,
 )
+from app.services.official_model_pricing import resolve_official_model_pricing_for_instance
 
 
 router = APIRouter()
@@ -50,6 +51,7 @@ async def test_knowledge_model_instance(
         return await _failed_result(instance_id, main_id, payload.capability, str(exc))
 
     await update_instance_health(instance_id, main_id, "healthy", "")
+    suggested_pricing = await resolve_official_model_pricing_for_instance(instance, main_id)
     response: dict[str, object] = {
         "success": True,
         "status": "healthy",
@@ -58,6 +60,8 @@ async def test_knowledge_model_instance(
     }
     if result.dimension is not None:
         response["dimension"] = result.dimension
+    if suggested_pricing:
+        response["suggestedPricing"] = suggested_pricing
     return response
 
 

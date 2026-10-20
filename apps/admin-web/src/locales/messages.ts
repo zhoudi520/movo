@@ -26,6 +26,10 @@ export const messages = {
   'modelPricing.currency': { 'zh-CN': '币种', 'en-US': 'Currency' },
   'modelPricing.input': { 'zh-CN': '输入单价 / 100 万 Token', 'en-US': 'Input per million tokens' },
   'modelPricing.output': { 'zh-CN': '输出单价 / 100 万 Token', 'en-US': 'Output per million tokens' },
+  'modelPricing.autoFilled': {
+    'zh-CN': '测试时已自动填入官方/网关公布的模型单价，请确认后保存。',
+    'en-US': 'Official or gateway pricing was filled in during the test. Review and save.',
+  },
   'tokenStats.avg': { 'zh-CN': '平均单次', 'en-US': 'Average per request' },
   'tokenStats.last24h': { 'zh-CN': '近24h', 'en-US': 'Last 24h' },
   'tokenStats.unpriced': { 'zh-CN': '有 {count} 次调用未配置单价', 'en-US': '{count} calls have no configured price' },

@@ -38,6 +38,7 @@ from app.services.image_model_configuration import (
 from app.services.model_image_connectivity import run_saved_image_model_test
 from app.services.model_test_tls import build_model_test_ssl_context
 from app.services.model_pricing import normalize_pricing
+from app.services.official_model_pricing import resolve_official_model_pricing_for_instance
 from app.api.routes import model_knowledge_tests
 from app.api.routes import model_groups
 from app.repositories.model_group_repository import find_group, list_groups
@@ -445,7 +446,8 @@ async def test_image_model_instance(
         await update_instance_health(instance_id, main_id, "failed", message)
         return {"success": False, "status": "failed", "message": message}
     await update_instance_health(instance_id, main_id, "healthy", "")
-    return {
+    suggested_pricing = await resolve_official_model_pricing_for_instance(instance, main_id)
+    response: dict[str, object] = {
         "success": True,
         "status": "healthy",
         "message": "图片生成测试成功。",
@@ -454,6 +456,9 @@ async def test_image_model_instance(
         "runtimeKind": str(result.get("runtime_kind") or ""),
         "modelSource": str(result.get("model_source") or ""),
     }
+    if suggested_pricing:
+        response["suggestedPricing"] = suggested_pricing
+    return response
 
 
 @router.post("/instances/{instance_id}/test/stream")
@@ -473,6 +478,9 @@ async def stream_model_instance_test(
         final_text = ""
         await update_instance_health(instance_id, main_id, "unknown", "")
         yield _sse({"type": "start", "message": "正在连接 backend 模型运行时..."})
+        suggested_pricing = await resolve_official_model_pricing_for_instance(instance, main_id)
+        if suggested_pricing:
+            yield _sse({"type": "pricing", "pricing": suggested_pricing})
         iterator = backend_model_test_events(instance_id, main_id, payload.prompt)
         while True:
             has_event, event = await asyncio.to_thread(next_event, iterator)

@@ -207,11 +207,19 @@ async def image_extract_facts(arguments: dict[str, Any], context: CapabilityExec
         reset_configured_model_context(previous_model)
 
     if not result.get("skipped") and not str(result.get("vision_summary") or "").strip():
+        detail = str(result.get("vision_error") or "").strip()
+        message = (
+            "The configured Vision model could not extract facts. "
+            "Test its API key and model ID in the admin console."
+        )
+        if detail:
+            message = f"{message} Provider detail: {detail[:800]}"
         return {
             "success": False,
             "ok": False,
             "error": "vision_extraction_failed",
-            "message": "The configured Vision model could not extract facts. Test its API key and model ID in the admin console.",
+            "message": message,
+            "vision_error": detail,
         }
     return {"success": True, **result}
 

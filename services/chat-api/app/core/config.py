@@ -112,7 +112,7 @@ class Settings(BaseSettings):
     DASHSCOPE_API_KEY: str = ""
     VISION_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     VISION_MODEL: str = "qwen3-vl-plus"
-    VISION_ENABLE_THINKING: bool = True
+    VISION_ENABLE_THINKING: bool = False
     VISION_THINKING_BUDGET: int = 81920
 
     # Deep Search

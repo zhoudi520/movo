@@ -7,6 +7,7 @@ from openai.lib._pydantic import to_strict_json_schema
 from pydantic import BaseModel
 
 from app.llm.base import BaseLLMClient
+from app.llm.chat_completion_kwargs import prepare_chat_completion_kwargs
 from app.llm.types import LLMResponse, Message, Role
 
 logger = logging.getLogger(__name__)
@@ -261,14 +262,15 @@ class AzureOpenAIClient(BaseLLMClient):
     @staticmethod
     def _prepare_chat_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
         """Keep the Chat Completions fallback on its own wire contract."""
-        prepared = dict(kwargs)
-        prepared.pop("stream", None)
+        prepared = prepare_chat_completion_kwargs(kwargs)
         prepared.pop("response_format", None)
         return prepared
 
     @staticmethod
-    def _should_fallback_to_chat(exc: Exception) -> bool:
+    def _should_fallback_to_chat(exc: Exception, *, has_tools: bool = False) -> bool:
         text = str(exc or "").lower()
+        if has_tools and "function tools with reasoning_effort" in text:
+            return False
         return (
             "there was an issue with your request" in text
             or "invalid_request_error" in text
@@ -595,7 +597,7 @@ class AzureOpenAIClient(BaseLLMClient):
             )
         except Exception as exc:
             self._log_responses_failure(exc, operation="ainvoke", request_summary=request_summary)
-            if not self._should_fallback_to_chat(exc):
+            if not self._should_fallback_to_chat(exc, has_tools=bool(kwargs.get("tools"))):
                 raise
             chat_messages = self._convert_messages_chat(messages)
             chat_prepared = self._prepare_chat_kwargs(kwargs)
@@ -691,7 +693,7 @@ class AzureOpenAIClient(BaseLLMClient):
             return
         except Exception as exc:
             self._log_responses_failure(exc, operation="astream", request_summary=request_summary)
-            if not self._should_fallback_to_chat(exc):
+            if not self._should_fallback_to_chat(exc, has_tools=bool(kwargs.get("tools"))):
                 raise
         chat_messages = self._convert_messages_chat(messages)
         chat_stream_kwargs = self._prepare_chat_kwargs(kwargs)
@@ -810,7 +812,7 @@ class AzureOpenAIClient(BaseLLMClient):
             return schema.model_validate_json(self._extract_json_text(str(getattr(response, "output_text", "") or "")))
         except Exception as exc:
             self._log_responses_failure(exc, operation="ainvoke_structured_json")
-            if not self._should_fallback_to_chat(exc):
+            if not self._should_fallback_to_chat(exc, has_tools=bool(kwargs.get("tools"))):
                 raise
             chat_messages = self._convert_messages_chat(fallback_messages)
             chat_prepared = self._prepare_chat_kwargs(kwargs)

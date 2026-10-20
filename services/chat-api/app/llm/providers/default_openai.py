@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from app.llm.types import Message, Role, LLMResponse
 from app.llm.base import BaseLLMClient
+from app.llm.chat_completion_kwargs import prepare_chat_completion_kwargs
 from app.llm.structured_fallback import (
     build_structured_fallback_messages,
     sanitize_structured_fallback_kwargs,
@@ -125,7 +126,7 @@ class DefaultOpenAIClient(BaseLLMClient):
             model=self.model,
             messages=oai_messages,
             stream=False,
-            **kwargs
+            **prepare_chat_completion_kwargs(kwargs),
         )
         choice = response.choices[0]
         
@@ -165,7 +166,7 @@ class DefaultOpenAIClient(BaseLLMClient):
     async def astream(self, messages: List[Message], **kwargs) -> AsyncGenerator[LLMResponse, None]:
         self._last_invocation_meta = None
         oai_messages = self._convert_messages(messages)
-        stream_kwargs = dict(kwargs)
+        stream_kwargs = prepare_chat_completion_kwargs(kwargs)
         stream_options = dict(stream_kwargs.get("stream_options") or {})
         stream_options.setdefault("include_usage", True)
         stream_kwargs["stream_options"] = stream_options

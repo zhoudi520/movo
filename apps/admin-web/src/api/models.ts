@@ -158,6 +158,13 @@ export async function testModelInstance(id: string) {
   return data;
 }
 
+export type ModelTestStreamEvent = {
+  type: string;
+  content?: string;
+  message?: string;
+  pricing?: ModelPricing;
+};
+
 export async function testImageModelInstance(id: string, prompt: string) {
   const { data } = await apiClient.post<{
     success: boolean;
@@ -166,6 +173,7 @@ export async function testImageModelInstance(id: string, prompt: string) {
     imageUrl?: string;
     providerType?: string;
     runtimeKind?: string;
+    suggestedPricing?: ModelPricing;
   }>(`/api/models/instances/${id}/test-image`, { prompt }, { timeout: IMAGE_MODEL_TEST_TIMEOUT_MS });
   return data;
 }
@@ -177,6 +185,7 @@ export async function testKnowledgeModelInstance(id: string, capability: 'embedd
     message: string;
     capability: 'embedding' | 'rerank';
     dimension?: number;
+    suggestedPricing?: ModelPricing;
   }>(`/api/models/instances/${id}/test-knowledge`, { capability });
   return data;
 }
@@ -184,7 +193,7 @@ export async function testKnowledgeModelInstance(id: string, capability: 'embedd
 export async function streamModelInstanceTest(
   id: string,
   prompt: string,
-  onEvent: (event: { type: string; content?: string; message?: string }) => void,
+  onEvent: (event: ModelTestStreamEvent) => void,
 ) {
   const authStore = useAuthStore();
   const baseURL = import.meta.env.VITE_ADMIN_API_BASE_URL || '/admin-api';

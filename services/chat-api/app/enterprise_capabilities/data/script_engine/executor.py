@@ -120,10 +120,10 @@ class ScriptPluginExecutor(BaseExecutor):
             raise ValueError("script plugin code is too large")
 
         user_id = str((inputs.output_spec or {}).get("user_id") or (inputs.output_spec or {}).get("userId") or "").strip()
-        log_print(
-            f"[script_plugin] start user_id={user_id} node_id={node.node_id} "
-            f"code_bytes={len(plugin_code.encode('utf-8'))} code={plugin_code}"
-        )
+        #log_print(
+        #    f"[script_plugin] start user_id={user_id} node_id={node.node_id} "
+        #    f"code_bytes={len(plugin_code.encode('utf-8'))} code={plugin_code}"
+        #)
         if not user_id:
             user_id = str(get_request_context().get("user_id") or "anonymous")
 

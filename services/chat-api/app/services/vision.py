@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.llm.configured_models import build_llm_client_from_config, get_configured_model_context
 from app.llm.factory import get_openai_compatible_client
 from app.llm.types import Message, Role
+from app.services.vision_invoke_kwargs import build_vision_invoke_kwargs
 from app.utils.oss_uploader import AliyunOSSUploader
 
 
@@ -19,6 +20,7 @@ class VisionService:
         self._model = settings.VISION_MODEL
         self._enable_thinking = bool(settings.VISION_ENABLE_THINKING)
         self._thinking_budget = int(settings.VISION_THINKING_BUDGET or 81920)
+        self._last_error: str = ""
 
     def _client(self, output_spec: Optional[Dict[str, Any]] = None):
         configured_model = get_configured_model_context()
@@ -70,9 +72,12 @@ class VisionService:
         max_images: int = 6,
         output_spec: Optional[Dict[str, Any]] = None,
     ) -> str:
+        self._last_error = ""
         if not self._enabled:
+            self._last_error = "multimodal_disabled"
             return ""
         if not images:
+            self._last_error = "no_images"
             return ""
 
         parts: List[Dict[str, Any]] = []
@@ -87,6 +92,7 @@ class VisionService:
                 }
             )
         if not parts:
+            self._last_error = "image_url_unresolved"
             return ""
 
         parts.append(
@@ -118,22 +124,24 @@ class VisionService:
             }
         )
 
-        extra_body: Dict[str, Any] = {}
-        if self._enable_thinking:
-            extra_body = {
-                "enable_thinking": True,
-                "thinking_budget": self._thinking_budget,
-            }
         try:
-            kwargs: Dict[str, Any] = {}
-            if extra_body:
-                kwargs["extra_body"] = extra_body
+            settings = get_settings()
+            kwargs = build_vision_invoke_kwargs(
+                configured_model=get_configured_model_context(),
+                fallback_base_url=str(settings.VISION_BASE_URL or ""),
+                enable_thinking=self._enable_thinking,
+                thinking_budget=self._thinking_budget,
+            )
             resp = await self._client(output_spec).ainvoke(
                 [Message(role=Role.USER, content=parts)],
                 **kwargs,
             )
-            return str(resp.message.content or "").strip()
+            text = str(resp.message.content or "").strip()
+            if not text:
+                self._last_error = "empty_model_response"
+            return text
         except Exception as exc:
+            self._last_error = str(exc)
             log_print(f"[vision] describe_images failed: {exc}", flush=True)
             return ""
 
@@ -170,6 +178,7 @@ class VisionService:
         return {
             "summary": summary,
             "facts": self._parse_image_facts(summary, len(images)),
+            "error": self._last_error,
         }
 
     def _parse_image_facts(self, summary: str, image_count: int) -> Dict[str, Any]:

@@ -704,6 +704,21 @@ async function runTest(row: ModelInstanceItem) {
   }, 100);
 }
 
+function shouldApplySuggestedPricing(pricing: ModelPricing | null) {
+  if (!pricing) {
+    return true;
+  }
+  return pricing.inputPerMillion === 0 && pricing.outputPerMillion === 0;
+}
+
+function applySuggestedPricing(pricing: ModelPricing) {
+  if (!shouldApplySuggestedPricing(form.value.pricing)) {
+    return;
+  }
+  form.value.pricing = { ...pricing };
+  message.info(t('modelPricing.autoFilled'));
+}
+
 async function runEditorTest() {
   if (!form.value.id) {
     return;
@@ -715,6 +730,9 @@ async function runEditorTest() {
   try {
     if (modelTestKind.value === 'image') {
       const result = await testImageModelInstance(form.value.id, testPrompt.value);
+      if (result.suggestedPricing) {
+        applySuggestedPricing(result.suggestedPricing);
+      }
       testResultText.value = result.message || (result.success ? t('图片生成测试成功。') : t('图片生成测试失败。'));
       testResultType.value = result.success ? 'success' : 'failed';
       testImageUrl.value = result.imageUrl || '';
@@ -723,12 +741,19 @@ async function runEditorTest() {
     }
     if (modelTestKind.value === 'embedding' || modelTestKind.value === 'rerank') {
       const result = await testKnowledgeModelInstance(form.value.id, modelTestKind.value);
+      if (result.suggestedPricing) {
+        applySuggestedPricing(result.suggestedPricing);
+      }
       testResultText.value = result.message || (result.success ? t('模型连接测试成功。') : t('测试失败'));
       testResultType.value = result.success ? 'success' : 'failed';
       await reload();
       return;
     }
     await streamModelInstanceTest(form.value.id, testPrompt.value, (event) => {
+      if (event.type === 'pricing' && event.pricing) {
+        applySuggestedPricing(event.pricing);
+        return;
+      }
       if (event.type === 'start') {
         testResultText.value = event.message || t('正在连接模型...');
         return;
