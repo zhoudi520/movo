@@ -7,6 +7,10 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
+from app.enterprise_capabilities.artifacts.references import (
+    is_allowed_local_storage_path,
+    resolve_artifact_user_id,
+)
 from app.services.document_context import document_context_service
 from app.services.document_parse_error_presenter import user_facing_parse_error
 from app.services.document_parser import document_parser_service
@@ -415,7 +419,7 @@ class RuntimeParseService:
             merged.append(dict(asset))
         return merged
 
-    async def _parse_local_document(self, *, item: Dict[str, Any]) -> Dict[str, Any]:
+    async def _parse_local_document(self, *, item: Dict[str, Any], user_id: str = "") -> Dict[str, Any]:
         local_path = str(item.get("local_path") or "").strip()
         filename = str(item.get("filename") or Path(local_path).name).strip()
         if not local_path:
@@ -441,7 +445,7 @@ class RuntimeParseService:
                 content,
                 filename=filename,
                 upload_images=True,
-                user_id="runtime-document-parser",
+                user_id=resolve_artifact_user_id(item, fallback=user_id),
             )
             markdown = str(docx_result.get("markdown") or "").strip()
             embedded_images = [dict(x) for x in list(docx_result.get("embedded_images") or []) if isinstance(x, dict)]
@@ -501,11 +505,17 @@ class RuntimeParseService:
             return existing_payload
         parsed_documents: List[Dict[str, Any]] = []
         active_contexts: List[str] = []
+        user_id = str(output_spec.get("user_id") or output_spec.get("userId") or "").strip()
 
         for idx, item in enumerate(sources[:8], start=1):
             local_path = str(item.get("local_path") or "").strip()
-            if local_path and Path(local_path).exists():
-                parsed = await self._parse_local_document(item=item)
+            if (
+                local_path
+                and Path(local_path).exists()
+                and user_id
+                and is_allowed_local_storage_path(local_path, user_id=user_id)
+            ):
+                parsed = await self._parse_local_document(item=item, user_id=user_id)
             else:
                 if local_path:
                     logger.info(

@@ -151,6 +151,22 @@ class ObjectStorageClient:
         assert self.bucket is not None
         self.bucket.put_object(object_path, data, headers=headers)
 
+    def delete_object(self, object_path: str) -> None:
+        """Remove a stored object and its local sidecar metadata when present."""
+        path = str(object_path or "").strip().lstrip("/")
+        if not path:
+            return
+        if self.storage_backend == "local":
+            file_path = self._local_file_path(path)
+            if file_path.exists():
+                file_path.unlink()
+            meta_path = file_path.with_suffix(file_path.suffix + ".meta")
+            if meta_path.exists():
+                meta_path.unlink()
+            return
+        assert self.bucket is not None
+        self.bucket.delete_object(path)
+
     def read_bytes(self, object_path: str) -> bytes:
         path = str(object_path or "").strip()
         if not path:

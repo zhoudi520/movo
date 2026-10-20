@@ -32,6 +32,9 @@ class _Storage:
         assert user_id == "user-a"
         return "/askai-api/api/files/user-a/derived/image_001.png", "user-a/derived/image_001.png"
 
+    def delete_object(self, object_path: str) -> None:
+        assert object_path == "document-parser/2026/08/image_001.png"
+
 
 def test_document_resource_can_flow_directly_into_image_facts(monkeypatch) -> None:
     captured: dict = {}

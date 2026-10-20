@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from app.enterprise_capabilities.artifacts.references import (
+    is_legacy_shared_storage_object_path,
     require_owned_artifacts,
     safe_owner_prefix,
 )
@@ -53,16 +54,21 @@ def _owned_resource(
     ).strip()
 
     if object_path and not object_path.startswith(safe_owner_prefix(user_id)):
-        # The parser is trusted to derive this reference from an already
-        # authorized source document. Re-home it before exposing it to another
-        # tool so downstream authorization never needs a service-owner bypass.
-        content = uploader.read_bytes(object_path)
-        _url, object_path = uploader.upload_bytes_with_path(
-            content=content,
-            user_id=user_id,
-            file_name=filename,
-            content_type=content_type,
-        )
+        if is_legacy_shared_storage_object_path(object_path):
+            legacy_path = object_path
+            content = uploader.read_bytes(legacy_path)
+            _url, object_path = uploader.upload_bytes_with_path(
+                content=content,
+                user_id=user_id,
+                file_name=filename,
+                content_type=content_type,
+            )
+            try:
+                uploader.delete_object(legacy_path)
+            except Exception:
+                pass
+        else:
+            raise PermissionError("derived resource reference is outside the authenticated user's storage scope")
     if not object_path:
         return None
 

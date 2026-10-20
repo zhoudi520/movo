@@ -338,3 +338,8 @@ outputs/*
 /apps/admin-web/pnpm-workspace.yaml
 /apps/user-web/pnpm-lock.yaml
 /apps/user-web/pnpm-workspace.yaml
+# 本地离线 Docling 模型与基础镜像 tarball（见 快速启动命令.md）
+/docker_base_images/*
+!/docker_base_images/offline-docling-models/
+/docker_base_images/offline-docling-models/*
+!/docker_base_images/offline-docling-models/.gitkeep

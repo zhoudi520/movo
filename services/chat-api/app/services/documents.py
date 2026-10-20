@@ -96,7 +96,14 @@ class DocumentService:
                 file_path = str(docx_result or "")
                 render_stats = {}
             uploader = AliyunOSSUploader()
-            _, object_path = uploader.upload_file_with_path(file_path, user_id)
+            try:
+                _, object_path = uploader.upload_file_with_path(file_path, user_id)
+            finally:
+                try:
+                    if file_path and os.path.exists(file_path):
+                        os.remove(file_path)
+                except OSError:
+                    pass
             signed_url = uploader.sign_url(object_path)
             return {
                 "type": "docx",

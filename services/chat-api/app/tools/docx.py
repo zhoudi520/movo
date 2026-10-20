@@ -4,6 +4,7 @@ from app.infrastructure.observability.config import log_print
 import os
 import mimetypes
 import re
+import tempfile
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from docx import Document
@@ -693,7 +694,6 @@ def generate_docx_file(
                 import base64
                 import binascii
                 import os as _os
-                import tempfile
 
                 if img_url.startswith("data:image/"):
                     try:
@@ -817,14 +817,11 @@ def generate_docx_file(
     # Ensure Word updates TOC fields on open
     _enable_update_fields_on_open(doc)
 
-    # Save
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    static_dir = os.path.join(base_dir, "static")
-    os.makedirs(static_dir, exist_ok=True)
-
     if not filename.endswith(".docx"):
         filename = f"{filename}.docx"
-    file_path = os.path.join(static_dir, filename)
+    safe_name = os.path.basename(str(filename or "report.docx").replace("\\", "_").replace("/", "_"))
+    fd, file_path = tempfile.mkstemp(suffix=f"_{safe_name}", prefix="movo-docx-")
+    os.close(fd)
     doc.save(file_path)
     if not return_metadata:
         return file_path

@@ -10,11 +10,21 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.services.documents import document_service
-from app.api.principal import require_end_user_principal
+from app.api.principal import ApiPrincipal, require_end_user_principal
+from app.enterprise_capabilities.artifacts.references import require_owned_artifact
 from app.services.local_file_signing import verify_local_file_signature
 from app.services.local_file_secret import resolve_local_file_signing_secret
 
 router = APIRouter()
+
+
+def _authorized_object_path(raw_path: str, *, user_id: str) -> str:
+    """Return a normalized object path after verifying it belongs to the caller."""
+    path = unquote(str(raw_path or "").strip())
+    try:
+        return str(require_owned_artifact({"object_path": path}, user_id=user_id)["object_path"])
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="artifact_access_denied") from exc
 
 
 class DocumentRenderRequest(BaseModel):
@@ -56,16 +66,15 @@ async def render_document(payload: DocumentRenderRequest) -> ApiResponse:
     return ApiResponse(code=0, message="success", data=result)
 
 
-@router.post(
-    "/documents/sign",
-    response_model=ApiResponse,
-    dependencies=[Depends(require_end_user_principal)],
-)
-async def sign_document(payload: DocumentSignRequest) -> ApiResponse:
+@router.post("/documents/sign", response_model=ApiResponse)
+async def sign_document(
+    payload: DocumentSignRequest,
+    principal: ApiPrincipal = Depends(require_end_user_principal),
+) -> ApiResponse:
     from app.utils.object_storage import ObjectStorageClient
 
     uploader = ObjectStorageClient()
-    object_path = unquote(payload.object_path)
+    object_path = _authorized_object_path(payload.object_path, user_id=principal.user_id)
     signed = uploader.sign_url(object_path, payload.expires)
     return ApiResponse(code=0, message="success", data={"url": signed})
 
@@ -88,19 +97,18 @@ class SaveBlueprintRequest(BaseModel):
     blueprint: dict = Field(..., description="Updated blueprint JSON")
 
 
-@router.post(
-    "/documents/save-blueprint",
-    response_model=ApiResponse,
-    dependencies=[Depends(require_end_user_principal)],
-)
-async def save_blueprint(payload: SaveBlueprintRequest) -> ApiResponse:
+@router.post("/documents/save-blueprint", response_model=ApiResponse)
+async def save_blueprint(
+    payload: SaveBlueprintRequest,
+    principal: ApiPrincipal = Depends(require_end_user_principal),
+) -> ApiResponse:
     """Save an edited blueprint back to the configured storage backend."""
     import json
     from app.utils.object_storage import ObjectStorageClient
 
     uploader = ObjectStorageClient()
     content = json.dumps(payload.blueprint, ensure_ascii=False, indent=2).encode("utf-8")
-    object_path = payload.blueprint_object_path
+    object_path = _authorized_object_path(payload.blueprint_object_path, user_id=principal.user_id)
     uploader.write_bytes(object_path, content, content_type="application/json; charset=utf-8")
     signed_url = uploader.sign_url(object_path)
     return ApiResponse(code=0, message="success", data={
@@ -109,15 +117,18 @@ async def save_blueprint(payload: SaveBlueprintRequest) -> ApiResponse:
     })
 
 
-@router.post(
-    "/documents/render-presentation-pptx",
-    response_model=ApiResponse,
-    dependencies=[Depends(require_end_user_principal)],
-)
-async def render_presentation_pptx(payload: PresentationPptxRenderRequest) -> ApiResponse:
+@router.post("/documents/render-presentation-pptx", response_model=ApiResponse)
+async def render_presentation_pptx(
+    payload: PresentationPptxRenderRequest,
+    principal: ApiPrincipal = Depends(require_end_user_principal),
+) -> ApiResponse:
+    blueprint_object_path = _authorized_object_path(
+        str(payload.blueprint_object_path or ""),
+        user_id=principal.user_id,
+    )
     result = await document_service.render_presentation_pptx(
-        user_id=str(payload.user_id),
-        blueprint_object_path=str(payload.blueprint_object_path or ""),
+        user_id=principal.user_id,
+        blueprint_object_path=blueprint_object_path,
         filename=payload.filename,
         title=payload.title,
     )
@@ -234,15 +245,15 @@ async def refresh_markdown_urls(payload: DocumentRefreshMarkdownRequest):
     )
 
 
-@router.post(
-    "/documents/fetch",
-    dependencies=[Depends(require_end_user_principal)],
-)
-async def fetch_document(payload: DocumentFetchRequest):
+@router.post("/documents/fetch")
+async def fetch_document(
+    payload: DocumentFetchRequest,
+    principal: ApiPrincipal = Depends(require_end_user_principal),
+):
     from app.utils.object_storage import ObjectStorageClient
 
     uploader = ObjectStorageClient()
-    object_path = unquote(payload.object_path)
+    object_path = _authorized_object_path(payload.object_path, user_id=principal.user_id)
     content_type = uploader.guess_content_type(object_path)
     content_bytes = uploader.read_bytes(object_path)
     is_markdown_doc = object_path.lower().endswith(".md") or "markdown" in content_type.lower()

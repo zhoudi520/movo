@@ -22,6 +22,13 @@ from app.enterprise_capabilities.data.script_engine.base import BaseExecutor
 from app.enterprise_capabilities.runtime.execution_contracts import CapabilityInputs
 from app.infrastructure.request_context import get_request_context
 from app.enterprise_capabilities.data.script_engine.message_ops import last_user_text_from_dict_messages
+from app.enterprise_capabilities.artifacts.references import (
+    is_allowed_local_storage_path,
+    require_owned_artifact,
+    user_local_storage_root,
+)
+from app.enterprise_capabilities.data.script_workspace_index import index_user_storage_files
+from app.infrastructure.observability.config import log_print
 from app.utils.oss_uploader import AliyunOSSUploader
 from app.enterprise_capabilities.data.script_engine.error_summary import execution_error_summary
 from app.enterprise_capabilities.data.script_engine.artifact_export import export_script_artifacts
@@ -113,6 +120,10 @@ class ScriptPluginExecutor(BaseExecutor):
             raise ValueError("script plugin code is too large")
 
         user_id = str((inputs.output_spec or {}).get("user_id") or (inputs.output_spec or {}).get("userId") or "").strip()
+        log_print(
+            f"[script_plugin] start user_id={user_id} node_id={node.node_id} "
+            f"code_bytes={len(plugin_code.encode('utf-8'))} code={plugin_code}"
+        )
         if not user_id:
             user_id = str(get_request_context().get("user_id") or "anonymous")
 
@@ -140,6 +151,11 @@ class ScriptPluginExecutor(BaseExecutor):
                     "messages": inputs.raw_messages or [],
                     "user_text": last_user_text_from_dict_messages(inputs.raw_messages or inputs.messages or []),
                     "output_spec": inputs.output_spec or {},
+                    "workspace": {
+                        "user_storage_dir": user_local_storage_root(user_id),
+                        "stored_files": index_user_storage_files(user_id),
+                        "session_files": files,
+                    },
                 },
                 "context": {
                     "task_id": task_id,
@@ -150,6 +166,7 @@ class ScriptPluginExecutor(BaseExecutor):
                     "work_dir": str(work_dir),
                     "input_dir": str(input_dir),
                     "output_dir": str(output_dir),
+                    "user_storage_dir": user_local_storage_root(user_id),
                 },
             }
             stdin_path.write_text(json.dumps(payload, ensure_ascii=False, default=str), encoding="utf-8")
@@ -172,6 +189,10 @@ class ScriptPluginExecutor(BaseExecutor):
             stdout = (completed.stdout or "")[: self._MAX_STDOUT_BYTES]
             stderr = (completed.stderr or "")[:8000]
             if completed.returncode != 0:
+                log_print(
+                    f"[script_plugin] failed user_id={user_id} node_id={node.node_id} "
+                    f"exit_code={completed.returncode} stderr={stderr[:4000]} stdout={stdout}"
+                )
                 raise RuntimeError(f"script plugin exited with code {completed.returncode}: {stderr or stdout}")
             result = self._parse_stdout(stdout)
             return self._build_artifacts(
@@ -184,6 +205,9 @@ class ScriptPluginExecutor(BaseExecutor):
 
     def _materialize_input_files(self, *, input_dir: Path, node: CapabilityTask, inputs: CapabilityInputs) -> List[Dict[str, Any]]:
         uploader = AliyunOSSUploader()
+        user_id = str((inputs.output_spec or {}).get("user_id") or (inputs.output_spec or {}).get("userId") or "").strip()
+        if not user_id:
+            user_id = str(get_request_context().get("user_id") or "anonymous")
         candidates = self._collect_file_candidates(node=node, inputs=inputs)
         files: List[Dict[str, Any]] = []
         seen: set[str] = set()
@@ -202,8 +226,9 @@ class ScriptPluginExecutor(BaseExecutor):
             target = input_dir / self._safe_filename(filename, fallback=f"input_{idx}")
             try:
                 if object_path:
-                    target.write_bytes(uploader.read_bytes(object_path))
-                elif local_path and Path(local_path).exists():
+                    owned_path = require_owned_artifact({"object_path": object_path}, user_id=user_id)["object_path"]
+                    target.write_bytes(uploader.read_bytes(owned_path))
+                elif local_path and Path(local_path).exists() and is_allowed_local_storage_path(local_path, user_id=user_id):
                     shutil.copyfile(local_path, target)
                 else:
                     continue
@@ -569,14 +594,23 @@ class ScriptPluginExecutor(BaseExecutor):
             import json
             import os
             import socket
+            import subprocess
             import sys
             import sysconfig
 
             def _deny_network(*args, **kwargs):
                 raise RuntimeError("network access is disabled in script_plugin")
 
+            def _deny_subprocess(*args, **kwargs):
+                raise RuntimeError("subprocess access is disabled in script_plugin")
+
             socket.socket = _deny_network
             socket.create_connection = _deny_network
+            subprocess.run = _deny_subprocess
+            subprocess.Popen = _deny_subprocess
+            subprocess.call = _deny_subprocess
+            subprocess.check_call = _deny_subprocess
+            subprocess.check_output = _deny_subprocess
 
             plugin_path, stdin_path = sys.argv[1], sys.argv[2]
             with open(stdin_path, "r", encoding="utf-8") as f:
@@ -590,33 +624,88 @@ class ScriptPluginExecutor(BaseExecutor):
                 raise RuntimeError("script plugin must define run(inputs, context)")
 
             context = payload.get("context") or {}
-            work_dir = os.path.realpath(str(context.get("work_dir") or ""))
+            _realpath = os.path.realpath
+            _abspath = os.path.abspath
+            _normpath = os.path.normpath
+            _stat = os.stat
+            _lstat = os.lstat
             _open = builtins.open
             _io_open = io.open
             _os_open = os.open
+            _listdir = os.listdir
+            _scandir = os.scandir
+            _walk = os.walk
+            _chdir = os.chdir
+            _mkdir = os.mkdir
+            _makedirs = os.makedirs
+
+            def _path_exists(path):
+                try:
+                    _stat(path)
+                    return True
+                except OSError:
+                    return False
+
+            def _bootstrap_root(path):
+                token = str(path or "").strip()
+                if not token:
+                    return ""
+                if _path_exists(token):
+                    return _realpath(token)
+                return _normpath(_abspath(token))
+
+            work_dir = _bootstrap_root(str(context.get("work_dir") or ""))
+            allowed_read_roots = []
+            for key in ("work_dir", "input_dir", "output_dir", "user_storage_dir"):
+                root = _bootstrap_root(str(context.get(key) or ""))
+                if root and root not in allowed_read_roots:
+                    allowed_read_roots.append(root)
+
             package_roots = set()
             for key in ("purelib", "platlib"):
                 value = sysconfig.get_paths().get(key)
                 if value:
-                    package_roots.add(os.path.realpath(value))
+                    package_roots.add(_bootstrap_root(value))
 
             def _is_write_mode(mode):
                 text = str(mode or "r")
                 return any(ch in text for ch in ("w", "a", "x", "+"))
 
-            def _check_path(path, *, write=False):
-                if not work_dir:
-                    return
+            def _resolve_path(path):
+                """Normalize paths without os.path.realpath (it would call hooked os.lstat)."""
                 raw = os.fspath(path)
                 if not raw:
-                    return
-                if not os.path.isabs(raw):
+                    return ""
+                if not os.path.isabs(raw) and work_dir:
                     raw = os.path.join(work_dir, raw)
-                real = os.path.realpath(raw)
-                if real != work_dir and not real.startswith(work_dir + os.sep):
-                    if not write and any(real == root or real.startswith(root + os.sep) for root in package_roots):
-                        return
-                    raise PermissionError("script_plugin file access is limited to work_dir")
+                return _normpath(_abspath(raw))
+
+            def _is_allowed_read(real):
+                if not real:
+                    return False
+                for root in allowed_read_roots:
+                    if real == root or real.startswith(root + os.sep):
+                        return True
+                for root in package_roots:
+                    if real == root or real.startswith(root + os.sep):
+                        return True
+                return False
+
+            def _is_allowed_write(real):
+                if not work_dir or not real:
+                    return False
+                return real == work_dir or real.startswith(work_dir + os.sep)
+
+            def _check_path(path, *, write=False):
+                real = _resolve_path(path)
+                if not real:
+                    return
+                if write:
+                    if not _is_allowed_write(real):
+                        raise PermissionError("script_plugin writes are limited to work_dir")
+                    return
+                if not _is_allowed_read(real):
+                    raise PermissionError("script_plugin file access is limited to work_dir and user storage")
 
             def _guarded_open(file, *args, **kwargs):
                 mode = args[0] if args else kwargs.get("mode", "r")
@@ -634,9 +723,49 @@ class ScriptPluginExecutor(BaseExecutor):
                     _check_path(file, write=write)
                 return _os_open(file, flags, mode, dir_fd=dir_fd)
 
+            def _guarded_listdir(path="."):
+                _check_path(path, write=False)
+                return _listdir(path)
+
+            def _guarded_scandir(path="."):
+                _check_path(path, write=False)
+                return _scandir(path)
+
+            def _guarded_walk(top, *args, **kwargs):
+                _check_path(top, write=False)
+                return _walk(top, *args, **kwargs)
+
+            def _guarded_stat(path, *args, **kwargs):
+                _check_path(path, write=False)
+                return _stat(path, *args, **kwargs)
+
+            def _guarded_lstat(path, *args, **kwargs):
+                _check_path(path, write=False)
+                return _lstat(path, *args, **kwargs)
+
+            def _guarded_chdir(path):
+                _check_path(path, write=True)
+                return _chdir(path)
+
+            def _guarded_mkdir(path, mode=0o777):
+                _check_path(path, write=True)
+                return _mkdir(path, mode)
+
+            def _guarded_makedirs(name, mode=0o777, exist_ok=False):
+                _check_path(name, write=True)
+                return _makedirs(name, mode, exist_ok=exist_ok)
+
             builtins.open = _guarded_open
             io.open = _guarded_io_open
             os.open = _guarded_os_open
+            os.listdir = _guarded_listdir
+            os.scandir = _guarded_scandir
+            os.walk = _guarded_walk
+            os.stat = _guarded_stat
+            os.lstat = _guarded_lstat
+            os.chdir = _guarded_chdir
+            os.mkdir = _guarded_mkdir
+            os.makedirs = _guarded_makedirs
             result = run(payload.get("inputs") or {}, context)
             if result is None:
                 result = {}

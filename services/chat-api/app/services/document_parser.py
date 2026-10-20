@@ -17,6 +17,7 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 from app.core.config import get_settings
 from app.services.document_processing_parse_client import document_processing_parse_client
 from app.skills_specs.pdf.scripts.extract_pdf_text import extract_text as extract_pdf_text
+from app.enterprise_capabilities.artifacts.references import resolve_artifact_user_id
 from app.utils.oss_uploader import AliyunOSSUploader
 
 
@@ -189,7 +190,7 @@ class DocumentParserService:
         *,
         filename: str = "",
         upload_images: bool = False,
-        user_id: str = "document-parser",
+        user_id: str = "",
     ) -> Dict[str, Any]:
         if not content:
             return {"markdown": "", "embedded_images": []}
@@ -241,11 +242,12 @@ class DocumentParserService:
                         image_filename = f"{os.path.splitext(os.path.basename(filename or 'document'))[0]}_image_{image_idx:03d}.{ext}"
                         url = ""
                         object_path = ""
-                        if uploader is not None:
+                        storage_user_id = str(user_id or "").strip()
+                        if uploader is not None and storage_user_id:
                             try:
                                 url, object_path = uploader.upload_bytes_with_path(
                                     blob,
-                                    user_id=user_id or "document-parser",
+                                    user_id=storage_user_id,
                                     file_name=image_filename,
                                     content_type=content_type,
                                 )
@@ -968,7 +970,7 @@ class DocumentParserService:
                     content,
                     filename=filename,
                     upload_images=True,
-                    user_id=str(document.get("user_id") or "document-parser").strip() or "document-parser",
+                    user_id=resolve_artifact_user_id(document),
                 )
                 markdown = str(docx_result.get("markdown") or "").strip()
                 embedded_images = [dict(x) for x in list(docx_result.get("embedded_images") or []) if isinstance(x, dict)]
@@ -1038,6 +1040,7 @@ class DocumentParserService:
         *,
         object_path: str,
         filename: str,
+        user_id: str = "",
     ) -> Dict[str, Any]:
         path = str(object_path or "").strip()
         ext = self._document_ext(filename, path)
@@ -1056,11 +1059,12 @@ class DocumentParserService:
                 parse_quality = dict(pdf_result.get("parse_quality") or {})
                 parser = str(pdf_result.get("parser") or f"local_{ext or 'document'}_object").strip()
             elif ext == "docx":
+                storage_user_id = str(user_id or "").strip() or resolve_artifact_user_id({"object_path": path})
                 docx_result = self._build_docx_parse_from_bytes(
                     content,
                     filename=filename,
                     upload_images=True,
-                    user_id="document-parser",
+                    user_id=storage_user_id,
                 )
                 markdown = str(docx_result.get("markdown") or "").strip()
                 embedded_images = [dict(x) for x in list(docx_result.get("embedded_images") or []) if isinstance(x, dict)]
@@ -1165,6 +1169,7 @@ class DocumentParserService:
         source_urls = self._resolve_document_urls(document)
         source_url = source_urls[0] if source_urls else ""
         filename = str(document.get("filename") or "").strip()
+        parser_user_id = resolve_artifact_user_id(document)
         if self._settings.DEBUG:
             logger.debug(
                 "document parse started",
@@ -1188,6 +1193,7 @@ class DocumentParserService:
             object_result = await self._local_parse_object_path(
                 object_path=self.resolve_document_object_path(document),
                 filename=filename,
+                user_id=parser_user_id,
             )
             if object_result.get("ok"):
                 return object_result
