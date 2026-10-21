@@ -403,6 +403,47 @@
         <section class="knowledge-settings-panel">
           <n-form class="provider-form knowledge-form" label-placement="top">
             <div class="knowledge-config-card">
+              <div class="knowledge-card-title">{{ t('knowledge.fileParse.title') }}</div>
+              <n-grid :cols="2" :x-gap="16" :y-gap="10">
+                <n-grid-item>
+                  <n-form-item :label="t('knowledge.fileParse.enabled')">
+                    <n-switch v-model:value="knowledgeForm.fileParse.enabled" />
+                  </n-form-item>
+                </n-grid-item>
+                <n-grid-item>
+                  <n-form-item :label="t('knowledge.fileParse.modelVersion')">
+                    <n-input v-model:value="knowledgeForm.fileParse.modelVersion" placeholder="vlm" />
+                  </n-form-item>
+                </n-grid-item>
+                <n-grid-item :span="2">
+                  <n-form-item :label="t('knowledge.fileParse.serviceUrl')">
+                    <n-input v-model:value="knowledgeForm.fileParse.serviceUrl" placeholder="https://mineru.example/api/v4" />
+                  </n-form-item>
+                </n-grid-item>
+                <n-grid-item :span="2">
+                  <n-form-item :label="t('knowledge.fileParse.apiKey')">
+                    <n-input
+                      v-model:value="knowledgeForm.fileParse.apiKey"
+                      type="password"
+                      show-password-on="click"
+                      :placeholder="knowledgeForm.fileParse.apiKeyMasked ? t('留空则保留已保存 Key') : ''"
+                    />
+                  </n-form-item>
+                </n-grid-item>
+                <n-grid-item>
+                  <n-form-item :label="t('knowledge.fileParse.language')">
+                    <n-input v-model:value="knowledgeForm.fileParse.language" placeholder="ch" />
+                  </n-form-item>
+                </n-grid-item>
+                <n-grid-item>
+                  <n-form-item :label="t('knowledge.fileParse.expiresAt')">
+                    <n-input v-model:value="knowledgeForm.fileParse.expiresAt" placeholder="2026-12-31T00:00:00Z" />
+                  </n-form-item>
+                </n-grid-item>
+              </n-grid>
+            </div>
+
+            <div class="knowledge-config-card">
               <div class="knowledge-card-title">{{ t('文档分段设置') }}</div>
               <n-grid :cols="2" :x-gap="16" :y-gap="10">
                 <n-grid-item>
@@ -897,6 +938,16 @@ const pageCollectionForm = reactive({
 function defaultKnowledgeSettings(): KnowledgeSettings {
   return {
     parse: { minChunkSize: 800, maxChunkSize: 1500, chunkOverlap: 120 },
+    fileParse: {
+      provider: 'mineru',
+      enabled: true,
+      serviceUrl: '',
+      apiKey: '',
+      apiKeyMasked: '',
+      modelVersion: 'vlm',
+      language: 'ch',
+      expiresAt: '',
+    },
     embedding: {
       provider: 'model_center',
       modelInstanceId: '',
@@ -1064,6 +1115,9 @@ async function loadPageCollection() {
 
 function applyKnowledgeSettings(settings: KnowledgeSettings) {
   Object.assign(knowledgeForm.parse, settings.parse);
+  if (settings.fileParse) {
+    Object.assign(knowledgeForm.fileParse, settings.fileParse, { apiKey: '' });
+  }
   Object.assign(knowledgeForm.embedding, settings.embedding);
   knowledgeForm.embedding.provider = 'model_center';
   Object.assign(knowledgeForm.vectorStore, settings.vectorStore, { apiKey: '' });

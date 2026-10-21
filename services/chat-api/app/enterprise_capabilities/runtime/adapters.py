@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from types import SimpleNamespace
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from app.enterprise_capabilities.data import MetricsEngine, run_script
 from app.enterprise_capabilities.artifacts import artifact_export, document_fill, document_transform, table_generate
@@ -18,6 +21,7 @@ from app.enterprise_capabilities.browser import browser_task
 from app.knowledge.retrieval.retrieval_client import KnowledgeRetrievalError
 from app.enterprise_capabilities.knowledge_result import unavailable_result
 from app.services.runtime_parse_service import runtime_parse_service
+from app.knowledge.citations.answer_images import enrich_answer_with_used_chunks
 from app.services.rag_service.internal_knowledge_qa_service import internal_knowledge_qa_service
 from app.enterprise_capabilities.knowledge_source.config import get_knowledge_source
 from app.enterprise_capabilities.knowledge_source.execution import search_external_knowledge
@@ -99,6 +103,11 @@ async def knowledge_search(arguments: dict[str, Any], context: CapabilityExecuti
         )
     except KnowledgeRetrievalError as exc:
         return unavailable_result(query=query, error=exc)
+    logger.info(
+        f"企业知识检索工具 knowledge_search: "
+        f" query={query!r}, knowledge_base_ids={selected}, "
+        f"ok={payload.get('ok')}, retrieved_count={payload.get('retrievedCount')}, used_count={payload.get('usedCount')}"
+    )
     used_chunks = list(payload.get("usedChunks") or [])
     evidence_items = []
     for chunk in used_chunks:
@@ -127,6 +136,14 @@ async def knowledge_search(arguments: dict[str, Any], context: CapabilityExecuti
     if bundle and used_chunks:
         payload["evidence_bundle"] = public_capability_evidence(bundle)
         payload["_execution_evidence_bundle"] = bundle
+    answer = str(payload.get("answer") or "").strip()
+    if answer and used_chunks:
+        answer = enrich_answer_with_used_chunks(answer, used_chunks)
+        payload["answer"] = answer
+    if payload.get("ok") and answer and used_chunks:
+        payload["markdown"] = answer
+        payload["accepted"] = True
+        payload["acceptance"] = {"reason": "internal_knowledge_qa"}
     return payload
 
 

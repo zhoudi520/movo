@@ -159,6 +159,7 @@ class InternalCapabilityCatalog:
                     "top_n": {"type": "integer", "minimum": 1, "maximum": 20},
                     "rerank": {"type": "boolean"},
                 }, ("query",)),
+                delivery_mode="authoritative_markdown",
             ),
             _definition(
                 capability_ref="knowledge.read_document@v1", tool_name="knowledge_read_document", domain="knowledge",

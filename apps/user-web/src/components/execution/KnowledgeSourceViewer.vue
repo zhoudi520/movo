@@ -9,6 +9,7 @@ import {
   fetchKnowledgeSourceChunk,
   fetchKnowledgeSourceDocument,
   fetchKnowledgeSourcePreview,
+  attachKnowledgeArtifactAccessToMarkdown,
   type KnowledgeSourceChunk,
   type KnowledgeSourceDocument,
 } from '../../api/knowledgeSources'
@@ -59,6 +60,12 @@ const titleText = computed(() => (
 ))
 const sourceText = computed(() => chunk.value?.text || activeSource.value?.content || activeSource.value?.snippet || '')
 const previewKind = computed(() => previewKindForDocument(documentMeta.value))
+const effectivePreviewKind = computed(() => {
+  if (documentMeta.value?.learningMode === 'mineru' && chunk.value?.contentType === 'markdown' && chunk.value.text) {
+    return 'markdown'
+  }
+  return previewKind.value
+})
 const highlightTargets = computed(() => {
   const type = String(chunk.value?.contentType || activeSource.value?.content_type || '').toLowerCase()
   if (type === 'table_row' || type.includes('table')) {
@@ -166,6 +173,11 @@ async function loadActiveSource() {
     if (currentLoadSeq !== loadSeq) return
     documentMeta.value = doc
     chunk.value = currentChunk
+    if (doc.learningMode === 'mineru' && currentChunk.text) {
+      nativeContent.value = attachKnowledgeArtifactAccessToMarkdown(currentChunk.text, token)
+      loading.value = false
+      return
+    }
     loading.value = false
     await nextTick()
     const kind = previewKindForDocument(doc)
@@ -1109,8 +1121,8 @@ onBeforeUnmount(() => {
                 <div v-if="previewUnavailable" class="flex h-full items-center justify-center p-8 text-center text-sm text-slate-500">
                   {{ t('evidence.no_preview') }}
                 </div>
-                <div v-else-if="previewKind === 'pdf'" ref="pdfLayerRef" class="pdf-source-layer"></div>
-                <div v-else-if="previewKind === 'image' && imageObjectUrl" class="h-full p-4">
+                <div v-else-if="effectivePreviewKind === 'pdf'" ref="pdfLayerRef" class="pdf-source-layer"></div>
+                <div v-else-if="effectivePreviewKind === 'image' && imageObjectUrl" class="h-full p-4">
                   <img
                     :src="imageObjectUrl"
                     :alt="titleText"
@@ -1118,8 +1130,8 @@ onBeforeUnmount(() => {
                   />
                 </div>
                 <NativeSourcePreview
-                  v-else-if="previewKind === 'markdown' || previewKind === 'text' || previewKind === 'html'"
-                  :kind="previewKind"
+                  v-else-if="effectivePreviewKind === 'markdown' || effectivePreviewKind === 'text' || effectivePreviewKind === 'html'"
+                  :kind="effectivePreviewKind"
                   :content="nativeContent"
                   :highlight-texts="highlightTargets"
                 />

@@ -1,5 +1,6 @@
 /** Shared Markdown projection for streaming and completed assistant content. */
 
+import { attachKnowledgeArtifactAccessToMarkdown } from '../api/knowledgeSources'
 import { projectSafeMarkdownLinks } from './safeMarkdownLinks'
 import { extractAssistantCodeBlocks } from './assistantCodeBlocks'
 
@@ -61,7 +62,8 @@ export function workspaceFileReference(value: string): string | null {
 }
 
 export function renderAssistantMarkdown(text: string, options: { workspaceFileReferences?: boolean } = {}): string {
-  const extracted = extractAssistantCodeBlocks(normalizeAssistantContent(text), sanitizeMermaid)
+  const normalized = attachKnowledgeArtifactAccessToMarkdown(normalizeAssistantContent(text))
+  const extracted = extractAssistantCodeBlocks(normalized, sanitizeMermaid)
   let html = extracted.text
   const blocks: string[] = [...extracted.blocks]
   const stash = (value: string) => {

@@ -191,6 +191,18 @@
 
   <n-modal v-model:show="uploadVisible" preset="card" :title="t('上传知识文档')" style="width: 720px">
     <div style="margin-bottom: 16px;">
+      <div style="margin-bottom: 8px; font-weight: 600; font-size: 14px;">{{ t('knowledge.upload.learningMode') }}</div>
+      <n-radio-group v-model:value="uploadLearningMode">
+        <n-space>
+          <n-radio value="rag">{{ t('knowledge.upload.modeRag') }}</n-radio>
+          <n-radio value="mineru">{{ t('knowledge.upload.modeMineru') }}</n-radio>
+        </n-space>
+      </n-radio-group>
+      <n-alert v-if="uploadLearningMode === 'mineru'" type="info" :bordered="false" style="margin-top: 10px;">
+        {{ t('knowledge.upload.modeMineruHint') }}
+      </n-alert>
+    </div>
+    <div style="margin-bottom: 16px;">
       <div style="margin-bottom: 8px; font-weight: 600; font-size: 14px;">{{ t('目标目录') }}</div>
       <n-select v-model:value="uploadDirectoryId" :options="directoryOptionsWithRoot" />
     </div>
@@ -684,6 +696,20 @@ const columns = computed<DataTableColumns<KnowledgeDocumentItem>>(() => [
     },
   },
   {
+    title: t('knowledge.contentSummary'),
+    key: 'contentSummary',
+    width: 220,
+    ellipsis: { tooltip: true },
+    render(row) {
+      const text = (row.contentSummary || '').trim();
+      if (text) return text;
+      if ((row.learningMode || 'rag') === 'mineru' && row.parseStatus === 'succeeded') {
+        return h('span', { class: 'muted-text' }, t('摘要生成中'));
+      }
+      return '—';
+    },
+  },
+  {
     title: t('更新时间'),
     key: 'updatedAt',
     width: 150,
@@ -917,9 +943,12 @@ function handlePageSizeChange() {
   void reload();
 }
 
+const uploadLearningMode = ref<'rag' | 'mineru'>('rag');
+
 function openUpload() {
   uploadQueue.value = [];
   showFloatPanel.value = false;
+  uploadLearningMode.value = 'rag';
   if (fileInputRef.value) {
     fileInputRef.value.value = '';
   }
@@ -1124,6 +1153,7 @@ async function uploadQueueItem(item: UploadQueueItem, replaceExisting = false) {
   formData.append('file', item.file);
   const targetDirId = uploadDirectoryId.value === 'root' ? '' : uploadDirectoryId.value;
   formData.append('directoryId', targetDirId);
+  formData.append('learningMode', uploadLearningMode.value);
   if (replaceExisting) {
     formData.append('replaceExisting', 'true');
   }

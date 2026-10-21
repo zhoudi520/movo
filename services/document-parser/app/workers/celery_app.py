@@ -8,7 +8,12 @@ celery_app = Celery(
     "askai_document_processing",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks.preview_conversion", "app.tasks.document_parsing", "app.tasks.document_indexing"],
+    include=[
+        "app.tasks.preview_conversion",
+        "app.tasks.document_parsing",
+        "app.tasks.document_indexing",
+        "app.tasks.mineru_parsing",
+    ],
 )
 
 celery_app.conf.update(

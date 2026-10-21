@@ -3,10 +3,17 @@ from __future__ import annotations
 import mimetypes
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, Header, HTTPException, Query, Request, status
+from starlette.responses import FileResponse
 
 from app.api.endpoints.auth import _resolve_session_user
 from app.core.db import get_db
+from app.knowledge.mineru.markdown_assets import (
+    guess_artifact_media_type,
+    local_artifact_path,
+    rewrite_mineru_markdown_image_urls,
+)
+from app.knowledge.mineru.storage_text import read_storage_text
 from app.services.knowledge_preview_stream import preview_response
 from app.services.personal_knowledge.access import PersonalKnowledgeAccessService
 from app.product.extensions import get_product_extension
@@ -39,8 +46,18 @@ def _serialize_chunk(chunk: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def _current_scope(authorization: str | None) -> tuple[str, str]:
-    resolved = await _resolve_session_user(authorization)
+async def _authorization_header(authorization: str | None, access_token: str | None = None) -> str | None:
+    """Prefer Authorization header; fall back to ``access_token`` query for img tags."""
+    if authorization:
+        return authorization
+    token = str(access_token or "").strip()
+    if not token:
+        return None
+    return token if token.lower().startswith("bearer ") else f"Bearer {token}"
+
+
+async def _current_scope(authorization: str | None, access_token: str | None = None) -> tuple[str, str]:
+    resolved = await _resolve_session_user(await _authorization_header(authorization, access_token))
     user_id = str(resolved["user"].get("_id") or "")
     main_id = str(resolved.get("main_id") or resolved["user"].get("main_id") or "default")
     return user_id, main_id
@@ -100,6 +117,35 @@ async def get_knowledge_source_document(
         "previewStatus": str(doc.get("preview_status") or ""),
         "chunkCount": int(doc.get("chunk_count") or 0),
         "canDownload": can_download,
+        "learningMode": str(doc.get("learning_mode") or "rag"),
+    }
+
+
+def _serialize_mineru_pseudo_chunk(doc: dict[str, Any], chunk_id: str) -> dict[str, Any]:
+    """Build a source chunk payload for MinerU pseudo chunk ids (``mineru_*``)."""
+    document_id = str(doc.get("_id") or "")
+    markdown_key = str(doc.get("parsed_markdown_key") or "").strip()
+    if not markdown_key:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="chunk not found")
+    try:
+        raw_text = read_storage_text(doc, markdown_key)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="chunk not found") from exc
+    text = rewrite_mineru_markdown_image_urls(raw_text, document_id=document_id)
+    title = str(doc.get("name") or doc.get("original_filename") or document_id)
+    return {
+        "id": f"{document_id}:{chunk_id}",
+        "documentId": document_id,
+        "chunkId": chunk_id,
+        "chunkStage": "mineru",
+        "ordinal": 0,
+        "text": text,
+        "contextualText": text,
+        "titlePath": [title],
+        "pageNo": None,
+        "contentType": "markdown",
+        "sourceChunkIds": [],
+        "metadata": {"learningMode": "mineru", "document_title": title},
     }
 
 
@@ -108,9 +154,12 @@ async def get_knowledge_source_chunk(
     document_id: str,
     chunk_id: str,
     authorization: str | None = Header(default=None),
+    access_token: str | None = Query(default=None),
 ) -> dict[str, Any]:
-    user_id, main_id = await _current_scope(authorization)
-    await _find_document_or_404(document_id, main_id, user_id)
+    user_id, main_id = await _current_scope(authorization, access_token)
+    doc = await _find_document_or_404(document_id, main_id, user_id)
+    if str(chunk_id).startswith("mineru"):
+        return _serialize_mineru_pseudo_chunk(doc, chunk_id)
     chunk = await get_db()[CHUNK_COLLECTION].find_one(
         {
             "main_id": main_id,
@@ -122,6 +171,23 @@ async def get_knowledge_source_chunk(
     if not chunk:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="chunk not found")
     return _serialize_chunk(chunk)
+
+
+@router.get("/knowledge/sources/documents/{document_id}/artifacts/{artifact_path:path}")
+async def get_knowledge_source_artifact(
+    document_id: str,
+    artifact_path: str,
+    authorization: str | None = Header(default=None),
+    access_token: str | None = Query(default=None),
+):
+    """Serve MinerU markdown image artifacts with session auth (header or query token)."""
+    user_id, main_id = await _current_scope(authorization, access_token)
+    doc = await _find_document_or_404(document_id, main_id, user_id)
+    if str(doc.get("learning_mode") or "").lower() != "mineru":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="artifact not found")
+    rel = str(artifact_path or "").strip().replace("\\", "/").lstrip("/")
+    path = local_artifact_path(doc, rel)
+    return FileResponse(path, media_type=guess_artifact_media_type(rel), content_disposition_type="inline")
 
 
 @router.get("/knowledge/sources/documents/{document_id}/preview")

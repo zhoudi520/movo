@@ -230,6 +230,7 @@ services:
     command: ["api"]
     environment: &document-environment
       MOVO_DOC_PROCESSING_APP_ENV: production
+      MOVO_DOC_PROCESSING_ADMIN_API_CALLBACK_BASE_URL: http://admin-api:8100
       MOVO_DOC_PROCESSING_LOCAL_STORAGE_DIR: /data/knowledge-documents
       MOVO_DOC_PROCESSING_REDIS_URL: redis://redis:6379/0
       MOVO_DOC_PROCESSING_MONGODB_URI: mongodb://mongo:27017

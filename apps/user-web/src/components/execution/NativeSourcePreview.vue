@@ -163,6 +163,21 @@ function markdownBlocks(content: string, targets: string[]): PreviewBlock[] {
       continue
     }
 
+    const imageMatch = /^!\[(.*?)\]\((.+)\)\s*$/.exec(trimmed)
+    if (imageMatch) {
+      const alt = imageMatch[1] || ''
+      const src = imageMatch[2] || ''
+      output.push({
+        key: `img-${index}`,
+        type: 'markdown',
+        html: `<p class="native-preview-image-wrap"><img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" class="native-preview-image" loading="lazy" /></p>`,
+        text: alt || src,
+        highlighted: isTargetMatch(alt || src, targets),
+      })
+      index += 1
+      continue
+    }
+
     const heading = /^(#{1,6})\s+(.+)$/.exec(trimmed)
     if (heading) {
       const level = Math.min(6, heading[1].length)
@@ -349,6 +364,14 @@ onMounted(() => {
   padding: 8px 10px;
   text-align: left;
   vertical-align: top;
+}
+
+.native-preview :deep(.native-preview-image) {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid #dbe4f0;
 }
 
 .native-preview :deep(th) {

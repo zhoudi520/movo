@@ -921,6 +921,14 @@ def _write_text_artifact(storage: Any, storage_key: str, text: str) -> None:
         storage.put_file(temp, storage_key)
 
 
+def _write_bytes_artifact(storage: Any, storage_key: str, payload: bytes) -> None:
+    """Write binary artifact bytes to knowledge storage."""
+    with tempfile.NamedTemporaryFile("w+b") as temp:
+        temp.write(payload)
+        temp.seek(0)
+        storage.put_file(temp, storage_key)
+
+
 def _write_json_artifact(storage: Any, storage_key: str, payload: dict[str, Any]) -> None:
     content = json.dumps(payload, ensure_ascii=False, indent=2)
     _write_text_artifact(storage, storage_key, content)

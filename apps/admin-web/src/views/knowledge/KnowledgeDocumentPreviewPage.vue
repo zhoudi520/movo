@@ -125,6 +125,14 @@
                   <strong>{{ formatAdminDateTime(document?.updatedAt, '-') }}</strong>
                 </div>
                 <div class="meta-row">
+                  <span>{{ t('knowledge.learningMode') }}</span>
+                  <strong>{{ learningModeLabel(document?.learningMode) }}</strong>
+                </div>
+                <div class="meta-row meta-row-full">
+                  <span>{{ t('knowledge.contentSummary') }}</span>
+                  <strong class="meta-summary">{{ contentSummaryText(document) }}</strong>
+                </div>
+                <div class="meta-row">
                   <span>{{ t('状态') }}</span>
                   <div style="margin-top: 4px; display: inline-flex;">
                     <DocumentStatus v-if="document" :row="document" @retry="retryParse" />
@@ -548,6 +556,21 @@ function mergeTableRowMarkdown(current: string, next: string) {
     return [current, next].filter(Boolean).join('\n\n');
   }
   return [...currentLines, ...nextLines.slice(2)].join('\n');
+}
+
+function learningModeLabel(mode?: string) {
+  if (mode === 'mineru') return t('knowledge.learningMode.mineru');
+  return t('knowledge.learningMode.rag');
+}
+
+function contentSummaryText(doc: { learningMode?: string; contentSummary?: string; parseStatus?: string } | null | undefined) {
+  const text = (doc?.contentSummary || '').trim();
+  if (text) return text;
+  if (doc?.learningMode === 'mineru' && doc?.parseStatus === 'succeeded') {
+    return t('摘要生成中');
+  }
+  if (doc?.learningMode === 'mineru') return '—';
+  return text || '—';
 }
 
 function processLabel(value: string) {

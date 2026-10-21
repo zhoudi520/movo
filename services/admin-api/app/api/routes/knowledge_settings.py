@@ -13,6 +13,7 @@ from app.api.deps import get_current_admin_user
 from app.api.time_utils import utc_iso
 from app.core.db import get_db
 from app.repositories.model_repository import encrypt_secret, find_instance_by_id, mask_secret
+from app.services.knowledge_file_parse_settings import default_file_parse_settings, serialize_file_parse_for_api
 
 router = APIRouter()
 
@@ -153,8 +154,19 @@ class IndexSettingsPayload(BaseModel):
     versioningEnabled: bool = True
 
 
+class FileParseSettingsPayload(BaseModel):
+    provider: Literal["mineru"] = "mineru"
+    enabled: bool = True
+    serviceUrl: str = Field(default="", max_length=600)
+    apiKey: str = Field(default="", max_length=1200)
+    modelVersion: str = Field(default="vlm", max_length=64)
+    language: str = Field(default="ch", max_length=16)
+    expiresAt: str = Field(default="", max_length=64)
+
+
 class KnowledgeSettingsPayload(BaseModel):
     parse: KnowledgeParseSettingsPayload = Field(default_factory=KnowledgeParseSettingsPayload)
+    fileParse: FileParseSettingsPayload = Field(default_factory=FileParseSettingsPayload)
     embedding: EmbeddingSettingsPayload = Field(default_factory=EmbeddingSettingsPayload)
     vectorStore: VectorStoreSettingsPayload = Field(default_factory=VectorStoreSettingsPayload)
     retrieval: RetrievalSettingsPayload = Field(default_factory=RetrievalSettingsPayload)
@@ -180,7 +192,9 @@ def default_parse_settings() -> dict[str, int]:
 
 
 def default_knowledge_settings() -> dict[str, Any]:
-    return KnowledgeSettingsPayload().model_dump()
+    data = KnowledgeSettingsPayload().model_dump()
+    data["fileParse"] = default_file_parse_settings()
+    return data
 
 
 def _deep_merge(defaults: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
@@ -230,6 +244,9 @@ def _serialize_full_settings(doc: dict[str, Any] | None) -> dict[str, Any]:
     else:
         data["vectorStore"]["apiKeyMasked"] = ""
     data["vectorStore"]["apiKey"] = ""
+    file_parse = dict((doc or {}).get("config") or {}).get("fileParse") or {}
+    data["fileParse"] = serialize_file_parse_for_api(file_parse)
+    data["fileParse"]["apiKey"] = ""
     data["updatedAt"] = utc_iso((doc or {}).get("updated_at"))
     return data
 
@@ -317,6 +334,17 @@ async def save_knowledge_settings(
     now = _now()
     config = payload.model_dump()
     existing = await get_db()[COLLECTION].find_one({"main_id": main_id, "kind": "knowledge"})
+    file_parse = dict(config.get("fileParse") or {})
+    api_key_fp = str(file_parse.pop("apiKey", "") or "")
+    if api_key_fp:
+        file_parse["apiKeyEncrypted"] = encrypt_secret(api_key_fp)
+        file_parse["apiKeyMasked"] = mask_secret(api_key_fp)
+    elif existing:
+        old_fp = dict((existing.get("config") or {}).get("fileParse") or {})
+        if old_fp.get("apiKeyEncrypted"):
+            file_parse["apiKeyEncrypted"] = old_fp.get("apiKeyEncrypted")
+            file_parse["apiKeyMasked"] = old_fp.get("apiKeyMasked", "")
+    config["fileParse"] = file_parse
     vector_store = dict(config.get("vectorStore") or {})
     api_key = str(vector_store.pop("apiKey", "") or "")
     if api_key:

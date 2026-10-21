@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import mimetypes
 import re
 import tempfile
@@ -25,7 +26,11 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.api.routes.knowledge_settings import get_effective_knowledge_settings, get_effective_parse_settings
 from app.repositories.org_user_repository import find_account_by_username
-from app.services.knowledge_storage import get_storage_service
+from app.services.knowledge_file_parse_settings import get_effective_file_parse_settings, is_mineru_ready
+from app.services.knowledge_document_mineru import complete_mineru_callback, retry_mineru_learning, start_mineru_processing
+from app.services.knowledge_storage import delete_document_storage, get_storage_service
+
+logger = logging.getLogger(__name__)
 from app.services.knowledge_preview_stream import preview_response
 from app.services.personal_knowledge_lifecycle import (
     activate_indexed_document,
@@ -88,6 +93,18 @@ class IndexCallbackPayload(BaseModel):
     vectorStoreType: str = ""
     collectionName: str = ""
     error: str = ""
+
+
+class MineruParseCallbackPayload(BaseModel):
+    jobId: str = Field(min_length=1)
+    status: str = Field(pattern=r"^(succeeded|failed)$")
+    markdownKey: str = ""
+    error: str = ""
+
+
+def _normalize_learning_mode(value: str) -> str:
+    """Normalize upload learning mode to rag or mineru."""
+    return "mineru" if str(value or "").strip().lower() == "mineru" else "rag"
 
 
 def _now() -> datetime:
@@ -210,13 +227,15 @@ def _serialize(doc: dict[str, Any]) -> dict[str, Any]:
         "storageBucket": str(doc.get("storage_bucket") or ""),
         "storageKey": str(doc.get("storage_key") or ""),
         "checksum": str(doc.get("checksum") or ""),
+        "learningMode": _normalize_learning_mode(str(doc.get("learning_mode") or "rag")),
+        "contentSummary": str(doc.get("content_summary") or ""),
         "status": str(doc.get("status") or "uploaded"),
         "parseStatus": str(doc.get("parse_status") or "not_started"),
         "parseJobId": str(doc.get("parse_job_id") or ""),
         "parseError": str(doc.get("parse_error") or ""),
         "parseUpdatedAt": _time_text(doc.get("parse_updated_at")),
-        "parsedMarkdownKey": str(doc.get("parsed_markdown_key") or ""),
-        "parsedJsonKey": str(doc.get("parsed_json_key") or ""),
+        "parsedMarkdownKey": "",
+        "parsedJsonKey": "",
         "rawChunksKey": str(doc.get("raw_chunks_key") or ""),
         "rawChunkCount": int(doc.get("raw_chunk_count") or 0),
         "ragChunksKey": str(doc.get("rag_chunks_key") or ""),
@@ -580,7 +599,16 @@ async def get_document_stats(current_user: dict = Depends(get_current_admin_user
         "$or": [{"scope": "organization"}, {"scope": {"$exists": False}}],
     }
     total = await db[COLLECTION].count_documents(base)
-    indexed = await db[COLLECTION].count_documents({**base, "status": "indexed"})
+    indexed_rag = await db[COLLECTION].count_documents({**base, "status": "indexed"})
+    indexed_mineru = await db[COLLECTION].count_documents(
+        {
+            **base,
+            "learning_mode": "mineru",
+            "parse_status": "succeeded",
+            "content_summary": {"$nin": ["", None]},
+        }
+    )
+    indexed = int(indexed_rag) + int(indexed_mineru)
     failed = await db[COLLECTION].count_documents({**base, "status": "failed"})
     local = await db[COLLECTION].count_documents({**base, "storage_type": "local"})
     oss = await db[COLLECTION].count_documents({**base, "storage_type": "oss"})
@@ -667,9 +695,15 @@ async def upload_document(
     documentScope: str = Form(default="organization"),
     ownerUserId: str = Form(default=""),
     resourceId: str = Form(default=""),
+    learningMode: str = Form(default="rag"),
     current_user: dict = Depends(get_current_admin_user),
 ) -> dict[str, Any]:
     main_id = str(current_user.get("main_id") or "default")
+    learning_mode = _normalize_learning_mode(learningMode)
+    if learning_mode == "mineru":
+        mineru_config = await get_effective_file_parse_settings(main_id, include_secrets=False)
+        if not is_mineru_ready(mineru_config):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MinerU 未配置，无法使用 MinerU 模式上传")
     original_filename = _safe_filename(file.filename or "document")
     file_ext = Path(original_filename).suffix.lower().lstrip(".")
     if file_ext not in _allowed_extensions():
@@ -745,6 +779,8 @@ async def upload_document(
             "storage_key": stored.storage_key,
             "local_path": stored.local_path,
             "checksum": checksum.hexdigest(),
+            "learning_mode": learning_mode,
+            "content_summary": "",
             "status": "uploaded",
             "parse_status": "not_started",
             "parse_job_id": "",
@@ -758,8 +794,8 @@ async def upload_document(
             "rag_chunk_count": 0,
             "chunks_key": "",
             "chunk_count": 0,
-            "chunk_status": "not_started",
-            "index_status": "not_started",
+            "chunk_status": "not_required" if learning_mode == "mineru" else "not_started",
+            "index_status": "not_required" if learning_mode == "mineru" else "not_started",
             "index_job_id": "",
             "index_error": "",
             "indexed_chunk_count": 0,
@@ -840,44 +876,51 @@ async def upload_document(
                 doc["preview_error"] = message
                 doc["preview_updated_at"] = _now()
         try:
-            parse_settings = await get_effective_parse_settings(main_id)
-            parse_job_id = _request_document_parse(
-                doc,
-                min_chunk_size=parse_settings["minChunkSize"],
-                chunk_size=parse_settings["chunkSize"],
-                chunk_overlap=parse_settings["chunkOverlap"],
-            )
-            await get_db()[COLLECTION].update_one(
-                {"_id": document_id, "main_id": main_id},
-                {
-                    "$set": {
-                        "status": "pending_parse",
-                        "parse_status": "queued",
-                        "chunk_status": "queued",
-                        "parse_job_id": parse_job_id,
-                        "parse_error": "",
-                        "parse_updated_at": _now(),
-                        "updated_at": _now(),
-                    }
-                },
-            )
-            doc["status"] = "pending_parse"
-            doc["parse_status"] = "queued"
-            doc["chunk_status"] = "queued"
-            doc["parse_job_id"] = parse_job_id
-            doc["parse_updated_at"] = _now()
-            await update_current_resource(
-                get_db(), doc, {"status": "pending_parse", "error": "", "updated_at": _now()},
-            )
+            if learning_mode == "mineru":
+                await start_mineru_processing(doc, temp_path=temp_path)
+                refreshed = await get_db()[COLLECTION].find_one({"_id": document_id, "main_id": main_id})
+                if refreshed:
+                    doc.update(refreshed)
+            else:
+                parse_settings = await get_effective_parse_settings(main_id)
+                parse_job_id = _request_document_parse(
+                    doc,
+                    min_chunk_size=parse_settings["minChunkSize"],
+                    chunk_size=parse_settings["chunkSize"],
+                    chunk_overlap=parse_settings["chunkOverlap"],
+                )
+                await get_db()[COLLECTION].update_one(
+                    {"_id": document_id, "main_id": main_id},
+                    {
+                        "$set": {
+                            "status": "pending_parse",
+                            "parse_status": "queued",
+                            "chunk_status": "queued",
+                            "parse_job_id": parse_job_id,
+                            "parse_error": "",
+                            "parse_updated_at": _now(),
+                            "updated_at": _now(),
+                        }
+                    },
+                )
+                doc["status"] = "pending_parse"
+                doc["parse_status"] = "queued"
+                doc["chunk_status"] = "queued"
+                doc["parse_job_id"] = parse_job_id
+                doc["parse_updated_at"] = _now()
+                await update_current_resource(
+                    get_db(), doc, {"status": "pending_parse", "error": "", "updated_at": _now()},
+                )
         except Exception as exc:
             message = str(exc)[:2000]
+            chunk_failed = "not_required" if learning_mode == "mineru" else "failed"
             await get_db()[COLLECTION].update_one(
                 {"_id": document_id, "main_id": main_id},
                 {
                     "$set": {
                         "status": "failed",
                         "parse_status": "failed",
-                        "chunk_status": "failed",
+                        "chunk_status": chunk_failed,
                         "parse_error": message,
                         "parse_updated_at": _now(),
                         "updated_at": _now(),
@@ -886,7 +929,7 @@ async def upload_document(
             )
             doc["status"] = "failed"
             doc["parse_status"] = "failed"
-            doc["chunk_status"] = "failed"
+            doc["chunk_status"] = chunk_failed
             doc["parse_error"] = message
             doc["parse_updated_at"] = _now()
             await update_current_resource(
@@ -915,7 +958,13 @@ async def retry_document_parse(document_id: str, current_user: dict = Depends(ge
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="文档正在学习中，请勿重复提交")
 
     now = _now()
+    learning_mode = _normalize_learning_mode(str(doc.get("learning_mode") or "rag"))
     try:
+        if learning_mode == "mineru":
+            doc["content_summary"] = ""
+            await retry_mineru_learning(doc)
+            updated = await _find_document_or_404(document_id, main_id)
+            return await _serialize_with_account_names(updated)
         parse_settings = await get_effective_parse_settings(main_id)
         parse_job_id = _request_document_parse(
             doc,
@@ -1115,6 +1164,18 @@ async def update_document(
 async def _soft_delete_document(doc: dict[str, Any], *, main_id: str, updated_by: str) -> None:
     db = get_db()
     document_id = str(doc.get("_id") or "")
+    try:
+        delete_document_storage(doc)
+    except Exception as exc:
+        await db[COLLECTION].update_one(
+            {"_id": document_id, "main_id": main_id},
+            {"$set": {"storage_purge_error": str(exc)[:2000], "storage_purge_status": "failed"}},
+        )
+    else:
+        await db[COLLECTION].update_one(
+            {"_id": document_id, "main_id": main_id},
+            {"$set": {"storage_purge_status": "succeeded", "storage_purge_error": ""}},
+        )
     now = _now()
     result = await db[COLLECTION].update_one(
         {"_id": document_id, "main_id": main_id, "deleted_at": None},
@@ -1207,6 +1268,59 @@ async def restore_document(document_id: str, current_user: dict = Depends(get_cu
     )
     doc = await _find_document_or_404(document_id, main_id)
     return await _serialize_with_account_names(doc)
+
+
+@router.post("/{document_id}/mineru-parse-callback")
+async def mineru_parse_callback(
+    document_id: str,
+    payload: MineruParseCallbackPayload,
+    authorization: str | None = Header(default=None),
+) -> dict[str, bool]:
+    """Handle MinerU parse completion from document-parser."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing callback token")
+    token = authorization.replace("Bearer ", "", 1).strip()
+    if token != settings.document_processing_callback_token:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid callback token")
+
+    db = get_db()
+    doc = await db[COLLECTION].find_one(
+        {"_id": document_id, "parse_job_id": payload.jobId, "deleted_at": None},
+    )
+    if not doc:
+        doc = await db[COLLECTION].find_one({"_id": document_id, "deleted_at": None})
+        if doc and str(doc.get("parse_job_id") or "") != payload.jobId:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"MinerU 任务 ID 不匹配: expected={doc.get('parse_job_id')}, got={payload.jobId}",
+            )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文档或 MinerU 任务不存在")
+    main_id = str(doc.get("main_id") or "default")
+    if payload.status == "failed":
+        await db[COLLECTION].update_one(
+            {"_id": document_id, "parse_job_id": payload.jobId},
+            {
+                "$set": {
+                    "parse_status": "failed",
+                    "status": "failed",
+                    "parse_error": payload.error[:2000],
+                    "parse_updated_at": _now(),
+                    "updated_at": _now(),
+                }
+            },
+        )
+        return {"success": True}
+    markdown_key = str(payload.markdownKey or "").strip()
+    if not markdown_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少 markdownKey")
+    try:
+        await complete_mineru_callback(document_id, main_id, markdown_key=markdown_key)
+    except Exception as exc:
+        logger.error(
+            f"MinerU 回调摘要/落库失败: document_id={document_id}, job_id={payload.jobId}, error={exc}"
+        )
+        return {"success": True}
+    return {"success": True}
 
 
 @router.post("/{document_id}/preview-callback")

@@ -33,6 +33,7 @@ import { evidenceSourceStats } from '../features/execution-v3/domain/evidenceSou
 import { resolvePermission } from '../composables/useChatStream'
 import { useDshToolApprovals } from '../composables/useDshToolApprovals'
 import { mergeEvidenceBundles } from '../composables/evidenceBundles'
+import { mergeKnowledgeEvidenceImagesIntoAnswer } from '../api/knowledgeSources'
 import { t, useLocale } from '../composables/i18n'
 import { formatAppTime } from '../composables/appTimezone'
 import { useChatModels } from '../composables/useChatModels'
@@ -736,11 +737,24 @@ const reportMatchByMessageKey = computed(() => {
   return map
 })
 
+function enrichAssistantAnswerContent(msg: Message, content: string): string {
+  const bundles = ensureExecV3(msg).state.evidenceBundles || []
+  const sources = bundles.flatMap((bundle) => bundle.sources || [])
+  if (!sources.length) return content
+  return mergeKnowledgeEvidenceImagesIntoAnswer(content, sources)
+}
+
 function reportSegmentsForMessage(msg: Message, idx: number): AssistantContentSegment[] {
   const key = msg._id || msg.message_id || `idx:${idx}`
   const segments = reportMatchByMessageKey.value.get(key)
-  if (segments?.length) return segments
-  return msg.content ? [{ kind: 'text', content: msg.content }] : []
+  const base = segments?.length
+    ? segments
+    : (msg.content ? [{ kind: 'text' as const, content: msg.content }] : [])
+  return base.map((segment) => (
+    segment.kind === 'text'
+      ? { ...segment, content: enrichAssistantAnswerContent(msg, segment.content) }
+      : segment
+  ))
 }
 
 async function onOpenReportMatch(item: ReportMatchItem) {

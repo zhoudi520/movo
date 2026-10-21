@@ -4,7 +4,7 @@
     type="button"
     class="doc-status-wrapper doc-status-button"
     :style="{ color: state.color }"
-    :title="t('点击重新学习')"
+    :title="state.tooltip || t('点击重新学习')"
     @click.stop="emit('retry')"
   >
     <span class="status-icon-box" v-html="state.icon"></span>
@@ -13,7 +13,7 @@
       <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 0-15.3-6.4" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 15.3 6.4" /><path d="M21 21v-5h-5" /></svg>
     </span>
   </button>
-  <div v-else class="doc-status-wrapper" :style="{ color: state.color }">
+  <div v-else class="doc-status-wrapper" :style="{ color: state.color }" :title="state.tooltip || ''">
     <!-- SVG 图标 -->
     <span class="status-icon-box" v-html="state.icon"></span>
     <!-- 状态文本 -->
@@ -36,13 +36,17 @@ const emit = defineEmits<{
 
 const state = computed(() => {
   const row = props.row;
+  const isMineru = (row.learningMode || 'rag') === 'mineru';
+  const summaryReady = Boolean((row.contentSummary || '').trim());
 
   // 1. 学习失败
   // 上传成功，但在后续的解析 (parse) 或索引 (index) 阶段发生失败
   if (row.parseStatus === 'failed' || row.indexStatus === 'failed') {
+    const err = (row.parseError || '').trim();
     return {
       label: t('学习失败'),
       color: '#D32F2F',
+      tooltip: err || undefined,
       retryable: row.parseStatus === 'failed' || row.chunkStatus === 'failed',
       icon: `<svg class="status-svg" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
         <circle cx="8" cy="8" r="7" fill="#FFF1F0" stroke="#D32F2F" stroke-width="1.2"/>
@@ -65,9 +69,34 @@ const state = computed(() => {
     };
   }
 
+  if (isMineru && row.parseStatus === 'succeeded' && summaryReady) {
+    return {
+      label: t('学习完成'),
+      color: '#52C41A',
+      retryable: false,
+      icon: `<svg class="status-svg" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="8" cy="8" r="7" fill="#F6FFED" stroke="#52C41A" stroke-width="1.2"/>
+        <path d="M5 8L7 10L11 6" stroke="#52C41A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>`,
+    };
+  }
+
+  if (isMineru && row.parseStatus === 'succeeded' && !summaryReady) {
+    return {
+      label: t('摘要生成中'),
+      color: '#1890FF',
+      retryable: false,
+      icon: `<svg class="status-svg spin-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="8" cy="8" r="7" stroke="#E6F7FF" stroke-width="1.2"/>
+        <path d="M8 1a7 7 0 0 1 7 7" stroke="#1890FF" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>`,
+    };
+  }
+
   // 3. 学习未开始
   // 两个子状态均为未开始 (not_started)
-  if (row.parseStatus === 'not_started' && row.indexStatus === 'not_started') {
+  const indexNotStarted = row.indexStatus === 'not_started';
+  if (row.parseStatus === 'not_started' && (indexNotStarted || (isMineru && row.indexStatus === 'not_required'))) {
     return {
       label: t('学习未开始'),
       color: '#90A4AE',

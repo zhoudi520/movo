@@ -46,6 +46,22 @@ class ParseDocumentJobRequest(BaseModel):
     chunkOverlap: int = Field(default=80, ge=0, le=2000)
 
 
+class MineruCredentials(BaseModel):
+    serviceUrl: str = ""
+    apiKey: str = ""
+
+
+class MineruParseJobRequest(BaseModel):
+    documentId: str = Field(min_length=1)
+    mainId: str = "default"
+    source: StorageRef
+    artifacts: ArtifactTarget
+    callback: CallbackRef
+    modelVersion: str = "vlm"
+    language: str = "ch"
+    mineru: MineruCredentials = Field(default_factory=MineruCredentials)
+
+
 class ParseMarkdownRequest(BaseModel):
     source: StorageRef
     sourceUrl: str = ""
@@ -96,6 +112,11 @@ class PreviewConvertJobResponse(BaseModel):
 
 
 class ParseDocumentJobResponse(BaseModel):
+    jobId: str
+    status: JobStatus
+
+
+class MineruParseJobResponse(BaseModel):
     jobId: str
     status: JobStatus
 

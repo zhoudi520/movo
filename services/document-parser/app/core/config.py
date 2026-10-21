@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     weaviate_distance_metric: str = "cosine"
     dashscope_api_key: str = ""
     admin_jwt_secret: str = ""
+    mineru_cdn_download_relay_url: str = ""
+    mineru_oss_upload_relay_url: str = ""
+    mineru_poll_interval_sec: int = 3
+    mineru_poll_timeout_sec: int = 300
+    mineru_zip_download_retries: int = 4
+    admin_api_callback_base_url: str = ""
 
     model_config = SettingsConfigDict(
         env_prefix=ENV_PREFIX,

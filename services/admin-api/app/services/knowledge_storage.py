@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import logging
 import os
+import shutil
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 from fastapi import HTTPException, status
 
 from app.core.config import settings
+from app.services.knowledge_document_paths import document_artifact_prefix, storage_prefix
+
+logger = logging.getLogger(__name__)
 
 
 class StoredFile:
@@ -73,6 +78,17 @@ class LocalStorageAdapter(StorageService):
         path = self._path(storage_key)
         return path.exists() and path.is_file()
 
+    def delete_prefix(self, prefix: str) -> None:
+        """Delete a directory tree under root_dir matching prefix."""
+        normalized = prefix.strip().lstrip("/").replace("\\", "/")
+        target = (self.root_dir / normalized).resolve()
+        if self.root_dir not in target.parents and target != self.root_dir:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文件路径无效")
+        if target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
+        elif target.is_file():
+            target.unlink(missing_ok=True)
+
 
 class OSSStorageAdapter(StorageService):
     storage_type = "oss"
@@ -109,9 +125,82 @@ class OSSStorageAdapter(StorageService):
     def exists(self, storage_key: str) -> bool:
         return bool(self.bucket.object_exists(storage_key))
 
+    def delete_prefix(self, prefix: str) -> None:
+        """Delete all objects under prefix."""
+        import oss2  # type: ignore
+
+        normalized = prefix.strip().lstrip("/").replace("\\", "/")
+        if not normalized.endswith("/"):
+            normalized = f"{normalized}/"
+        try:
+            for obj in oss2.ObjectIterator(self.bucket, prefix=normalized):
+                self.bucket.delete_object(obj.key)
+        except Exception as exc:  # pragma: no cover
+            logger.warning(f"OSS delete_prefix failed: prefix={normalized}, error={exc}")
+
 
 def get_storage_service(storage_type: str | None = None) -> StorageService:
     storage_type = str(storage_type or settings.knowledge_storage_type or "local").strip().lower()
     if storage_type == "oss":
         return OSSStorageAdapter()
     return LocalStorageAdapter(os.path.abspath(settings.knowledge_local_storage_dir))
+
+
+def delete_document_storage(doc: dict[str, Any]) -> None:
+    """
+    Remove original file, preview, and artifact tree for a knowledge document.
+
+    Args:
+        doc: Mongo knowledge_documents row.
+    """
+    storage_type = str(doc.get("storage_type") or "local")
+    storage = get_storage_service(storage_type)
+    keys = [
+        str(doc.get("storage_key") or "").strip(),
+        str(doc.get("preview_key") or "").strip(),
+        str(doc.get("parsed_markdown_key") or "").strip(),
+        str(doc.get("parsed_json_key") or "").strip(),
+        str(doc.get("raw_chunks_key") or "").strip(),
+        str(doc.get("rag_chunks_key") or "").strip(),
+        str(doc.get("chunks_key") or "").strip(),
+    ]
+    seen: set[str] = set()
+    for key in keys:
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        try:
+            storage.delete_file(key)
+        except Exception as exc:
+            logger.warning(f"delete_document_storage file failed: key={key}, error={exc}")
+    main_id = str(doc.get("main_id") or "default")
+    document_id = str(doc.get("_id") or "")
+    if document_id:
+        artifact_prefix = document_artifact_prefix(main_id, document_id)
+        try:
+            storage.delete_prefix(artifact_prefix)
+        except Exception as exc:
+            logger.warning(f"delete_document_storage prefix failed: prefix={artifact_prefix}, error={exc}")
+        doc_prefix = f"{storage_prefix()}/{main_id}/{document_id}/"
+        try:
+            storage.delete_prefix(doc_prefix)
+        except Exception as exc:
+            logger.warning(f"delete_document_storage doc tree failed: prefix={doc_prefix}, error={exc}")
+
+
+def read_text_artifact(doc: dict[str, Any], storage_key: str) -> str:
+    """Read a text artifact from document storage."""
+    storage = get_storage_service(str(doc.get("storage_type") or "local"))
+    with storage.open_file(storage_key) as fileobj:
+        raw = fileobj.read()
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8", errors="ignore")
+    return str(raw)
+
+
+def write_text_artifact(doc: dict[str, Any], storage_key: str, text: str) -> None:
+    """Write a text artifact to document storage."""
+    storage = get_storage_service(str(doc.get("storage_type") or "local"))
+    from io import BytesIO
+
+    storage.put_file(BytesIO(text.encode("utf-8")), storage_key)

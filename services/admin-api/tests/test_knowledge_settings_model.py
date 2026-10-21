@@ -5,6 +5,12 @@ from app.api.routes.knowledge_settings import (
 )
 
 
+def test_default_knowledge_settings_includes_file_parse() -> None:
+    file_parse = default_knowledge_settings()["fileParse"]
+    assert file_parse["provider"] == "mineru"
+    assert file_parse["modelVersion"]
+
+
 def test_embedding_has_no_environment_backed_default() -> None:
     assert default_knowledge_settings()["embedding"] == {
         "provider": "model_center",

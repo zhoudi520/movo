@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     knowledge_min_chunk_size: int = 800
     knowledge_chunk_size: int = 1500
     knowledge_chunk_overlap: int = 120
+    mineru_service_url: str = ""
+    mineru_api_key: str = ""
+    mineru_model_version: str = "vlm"
+    mineru_language: str = "ch"
+    knowledge_summary_max_chars: int = 200
+    knowledge_summary_model_instance_id: str = ""
 
     model_config = SettingsConfigDict(
         env_prefix="ASKAI_ADMIN_",

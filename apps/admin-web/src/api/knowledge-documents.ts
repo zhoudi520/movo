@@ -1,7 +1,13 @@
 import { apiClient } from './client';
 
 export type KnowledgeDocumentStatus = 'uploaded' | 'pending_parse' | 'parsed' | 'indexed' | 'failed';
-export type KnowledgeProcessStatus = 'not_started' | 'queued' | 'running' | 'succeeded' | 'failed';
+export type KnowledgeProcessStatus =
+  | 'not_started'
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'not_required';
 
 export interface KnowledgeDocumentItem {
   id: string;
@@ -18,6 +24,8 @@ export interface KnowledgeDocumentItem {
   storageBucket: string;
   storageKey: string;
   checksum: string;
+  learningMode: 'rag' | 'mineru';
+  contentSummary: string;
   status: KnowledgeDocumentStatus;
   parseStatus: KnowledgeProcessStatus;
   parseJobId: string;

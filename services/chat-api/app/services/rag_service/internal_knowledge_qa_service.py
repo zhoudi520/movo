@@ -1,9 +1,62 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List
 
+from app.core.db import get_db
+
+logger = logging.getLogger(__name__)
 from app.knowledge.api.schemas import KnowledgeChunk, KnowledgeCitation, KnowledgeQARequest, KnowledgeQAResult
+from app.knowledge.citations.answer_images import enrich_answer_with_used_chunks
 from app.knowledge.citations.citation_resolver import build_evidence_bundle
+
+
+def _preview_text(value: Any, *, limit: int = 2000) -> str:
+    """
+    Format text for logs; truncate very long chunk bodies.
+
+    Args:
+        value: Raw chunk or answer text.
+        limit: Maximum characters to include in one log line block.
+
+    Returns:
+        Log-safe preview string.
+    """
+    text = str(value or "").strip().replace("\r\n", "\n")
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}\n...(truncated, total={len(text)} chars)"
+
+
+def _log_qa_retrieval(
+    *,
+    query: str,
+    main_id: str,
+    knowledge_ids: list[str],
+    result: KnowledgeQAResult,
+    used_chunks: list[dict[str, Any]],
+    answer: str,
+) -> None:
+    """Log retrieved and used knowledge fragments for enterprise knowledge search."""
+    retrieved = list(result.retrieved_chunks or [])
+    logger.info(
+        f"企业知识检索 QA: main_id={main_id}, knowledge_ids={knowledge_ids}, "
+        f"query={query!r}, retrieved_count={len(retrieved)}, used_count={len(used_chunks)}"
+    )
+    for index, chunk in enumerate(retrieved, start=1):
+        text = str(chunk.contextual_text or chunk.text or "").strip()
+        logger.info(
+            f"企业知识检索 retrieved[{index}] citation={chunk.document_id}:{chunk.chunk_id} "
+            f"stage={chunk.chunk_stage} score={chunk.score} title_path={chunk.title_path}\n"
+            f"{_preview_text(text)}"
+        )
+    for index, row in enumerate(used_chunks, start=1):
+        logger.info(
+            f"企业知识检索 used[{index}] citation={row.get('documentId')}:{row.get('chunkId')} "
+            f"title={row.get('title')}\n{_preview_text(row.get('text'))}"
+        )
+    if answer:
+        logger.info(f"企业知识检索 answer_preview:\n{_preview_text(answer, limit=3000)}")
 
 
 def _model_dump(value: Any) -> Dict[str, Any]:
@@ -134,6 +187,43 @@ def _used_chunks_as_results(used_chunks: List[Dict[str, Any]]) -> List[Dict[str,
     return rows
 
 
+async def _scope_mode_flags(main_id: str, knowledge_base_ids: list[str]) -> tuple[bool, bool]:
+    """
+    Detect whether the scoped knowledge bases contain rag and/or mineru documents.
+
+    Returns:
+        Tuple of (has_rag, has_mineru).
+    """
+    query: dict = {
+        "main_id": main_id,
+        "deleted_at": None,
+        "$or": [{"scope": "organization"}, {"scope": {"$exists": False}}],
+    }
+    ids = [item for item in knowledge_base_ids if item]
+    if ids:
+        query["knowledge_base_id"] = {"$in": ids}
+    rows = await get_db().knowledge_documents.find(query, {"learning_mode": 1}).to_list(length=2000)
+    has_rag = any(str(row.get("learning_mode") or "rag") != "mineru" for row in rows)
+    has_mineru = any(str(row.get("learning_mode") or "") == "mineru" for row in rows)
+    return has_rag, has_mineru
+
+
+def _merge_qa_results(primary: KnowledgeQAResult, secondary: KnowledgeQAResult) -> KnowledgeQAResult:
+    """Merge rag and mineru QA results into one response."""
+    parts = [str(primary.answer or "").strip(), str(secondary.answer or "").strip()]
+    answer = "\n\n".join([part for part in parts if part])
+    chunks = list(primary.retrieved_chunks or []) + list(secondary.retrieved_chunks or [])
+    citations = list(primary.citations or []) + list(secondary.citations or [])
+    used = list(primary.used_chunk_ids or []) + list(secondary.used_chunk_ids or [])
+    return KnowledgeQAResult(
+        answer=answer or "内部知识库中未找到足够依据。",
+        citations=citations,
+        retrieved_chunks=chunks,
+        used_chunk_ids=used,
+        raw_model_output=f"{primary.raw_model_output}\n---\n{secondary.raw_model_output}",
+    )
+
+
 class InternalKnowledgeQAService:
     """QA-mode internal knowledge tool service.
 
@@ -184,9 +274,29 @@ class InternalKnowledgeQAService:
             top_n=max(1, min(50, int(top_k or 8))),
         )
         from app.knowledge.agents.knowledge_qa_agent import knowledge_qa_agent
+        from app.knowledge.agents.mineru_knowledge_qa_agent import mineru_knowledge_qa_agent
 
-        result = await knowledge_qa_agent.answer(request)
+        has_rag, has_mineru = await _scope_mode_flags(request.main_id, list(request.knowledge_base_ids or []))
+        if has_mineru and not has_rag:
+            result = await mineru_knowledge_qa_agent.answer(request)
+        elif has_mineru and has_rag:
+            rag_result, mineru_result = await knowledge_qa_agent.answer(request), await mineru_knowledge_qa_agent.answer(
+                request
+            )
+            result = _merge_qa_results(rag_result, mineru_result)
+        else:
+            result = await knowledge_qa_agent.answer(request)
         used_chunks = _used_chunks(result)
+        enriched_answer = enrich_answer_with_used_chunks(str(result.answer or ""), used_chunks)
+        result.answer = enriched_answer
+        _log_qa_retrieval(
+            query=q,
+            main_id=request.main_id,
+            knowledge_ids=list(request.knowledge_base_ids or []),
+            result=result,
+            used_chunks=used_chunks,
+            answer=enriched_answer,
+        )
         citations = [_model_dump(item) for item in list(result.citations or [])]
         evidence_bundle = build_evidence_bundle(q, list(result.citations or []))
         return {
@@ -198,7 +308,7 @@ class InternalKnowledgeQAService:
             "main_id": request.main_id,
             "session_id": request.session_id,
             "knowledge_ids": list(request.knowledge_base_ids or []),
-            "answer": result.answer,
+            "answer": enriched_answer,
             "usedChunks": used_chunks,
             "citations": citations,
             "evidenceBundle": evidence_bundle,

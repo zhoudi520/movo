@@ -13,8 +13,21 @@ export interface KnowledgeParseSettingsPayload {
   chunkOverlap: number;
 }
 
+export interface KnowledgeFileParseSettings {
+  provider: 'mineru';
+  enabled: boolean;
+  serviceUrl: string;
+  apiKey: string;
+  apiKeyMasked?: string;
+  modelVersion: string;
+  language: string;
+  expiresAt: string;
+  configured?: boolean;
+}
+
 export interface KnowledgeSettings {
   parse: KnowledgeParseSettingsPayload;
+  fileParse: KnowledgeFileParseSettings;
   embedding: {
     provider: 'model_center';
     modelInstanceId: string;

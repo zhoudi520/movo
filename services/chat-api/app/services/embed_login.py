@@ -9,12 +9,18 @@ from typing import Any
 from pymongo.errors import DuplicateKeyError
 
 from app.core.tenant import add_main_scope, resolve_main_id
+from app.governance.position_policy import CAPABILITY_KEYS
 
 USER_COLLECTION = "end_users"
 SETUP_COLLECTION = "system_bootstrap"
 DEPARTMENT_COLLECTION = "org_units"
 ORGANIZATION_COLLECTION = "organizations"
 USER_ORG_REL_COLLECTION = "end_user_org_relations"
+POSITION_ROLE_COLLECTION = "position_roles"
+USER_ROLE_COLLECTION = "end_user_position_roles"
+FULL_ACCESS_ROLE_KEY = "full_access_admin"
+FULL_ACCESS_ROLE_NAME = "全能力管理员"
+EMBED_ROLE_ACTOR = "embed-login"
 
 _EMBED_LOGIN_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
@@ -96,6 +102,67 @@ async def _resolve_org_name(db: Any, main_id: str) -> str:
     return str((setup or {}).get("org_name") or main_id).strip()
 
 
+async def _ensure_full_access_role(db: Any, main_id: str) -> dict[str, Any]:
+    """Ensure the tenant-wide full-access position role exists and return its document."""
+
+    now = _now()
+    role_id = f"system:{main_id}:{FULL_ACCESS_ROLE_KEY}"
+    await db[POSITION_ROLE_COLLECTION].update_one(
+        {"main_id": main_id, "system_key": FULL_ACCESS_ROLE_KEY},
+        {
+            "$setOnInsert": {
+                "_id": role_id,
+                "main_id": main_id,
+                "name": FULL_ACCESS_ROLE_NAME,
+                "description": "系统保障角色，自动拥有企业全部 Agent 能力、工具与 Skill。",
+                "created_at": now,
+            },
+            "$set": {
+                "status": "active",
+                "protected": True,
+                "capabilities": {key: True for key in CAPABILITY_KEYS},
+                "tool_access_mode": "all",
+                "tool_ids": [],
+                "skill_access_mode": "all",
+                "skill_ids": [],
+                "updated_at": now,
+            },
+        },
+        upsert=True,
+    )
+    role = await db[POSITION_ROLE_COLLECTION].find_one({"main_id": main_id, "system_key": FULL_ACCESS_ROLE_KEY})
+    if not role:
+        raise RuntimeError("全能力管理员岗位角色初始化失败")
+    return dict(role)
+
+
+async def _user_has_position_role(db: Any, main_id: str, user_id: str) -> bool:
+    """Return whether the user already has at least one position role assignment."""
+
+    count = await db[USER_ROLE_COLLECTION].count_documents({"main_id": main_id, "user_id": user_id})
+    return count > 0
+
+
+async def ensure_embed_default_position_role(db: Any, main_id: str, user_id: str) -> None:
+    """Assign full-access admin as the primary role when embed users have no position role yet."""
+
+    if await _user_has_position_role(db, main_id, user_id):
+        return
+    role = await _ensure_full_access_role(db, main_id)
+    role_id = str(role.get("_id") or "")
+    if not role_id:
+        raise RuntimeError("全能力管理员岗位角色 ID 无效")
+    now = _now()
+    await db[USER_ROLE_COLLECTION].update_one(
+        {"main_id": main_id, "user_id": user_id, "role_id": role_id},
+        {
+            "$setOnInsert": {"created_at": now, "created_by": EMBED_ROLE_ACTOR},
+            "$set": {"is_primary": True, "updated_at": now, "updated_by": EMBED_ROLE_ACTOR},
+        },
+        upsert=True,
+    )
+
+
 async def provision_embed_end_user(db: Any, main_id: str, login_name_input: str) -> dict[str, Any]:
     """Create an active end user for embed login without a password.
 
@@ -144,6 +211,7 @@ async def provision_embed_end_user(db: Any, main_id: str, login_name_input: str)
             "updated_at": now,
         }
     )
+    await ensure_embed_default_position_role(db, main_id, user_id)
     user_doc["_id"] = result.inserted_id
     return user_doc
 
@@ -192,6 +260,9 @@ async def resolve_embed_end_user(
     """Find or optionally provision the embed end user."""
 
     user_doc = await find_embed_user(db, main_id, login_name_input)
-    if user_doc or not auto_provision:
+    if user_doc:
+        await ensure_embed_default_position_role(db, main_id, str(user_doc["_id"]))
         return user_doc
+    if not auto_provision:
+        return None
     return await provision_embed_end_user(db, main_id, login_name_input)
