@@ -260,34 +260,55 @@
                 <div class="muted">{{ t('保存 MCP 服务后发现远程服务暴露的 tools，并选择允许 Agent 使用的项。') }}</div>
                 <div class="muted">{{ t('审批与风险标签按运行时 Tool Profile 规则预览，修改连接 config 后会自动刷新。') }}</div>
               </div>
-              <n-button type="primary" :disabled="!editingId" :loading="discovering" @click="discoverTools">
-                <template #icon><n-icon><SearchOutline /></n-icon></template>
-                {{ t('发现 MCP Tools') }}
-              </n-button>
+              <n-space :size="8" align="center">
+                <span v-if="discoveredTools.length" class="muted mcp-tools-count">
+                  {{ t('已选 {selected} / {total}', { selected: selectedMcpToolNames.length, total: discoveredTools.length }) }}
+                </span>
+                <n-button
+                  secondary
+                  :disabled="!discoveredTools.length || allMcpToolsSelected"
+                  @click="selectAllMcpTools"
+                >
+                  {{ t('全选') }}
+                </n-button>
+                <n-button
+                  secondary
+                  :disabled="!discoveredTools.length || !hasMcpToolSelection"
+                  @click="clearAllMcpTools"
+                >
+                  {{ t('全取消') }}
+                </n-button>
+                <n-button type="primary" :disabled="!editingId" :loading="discovering" @click="discoverTools">
+                  <template #icon><n-icon><SearchOutline /></n-icon></template>
+                  {{ t('发现 MCP Tools') }}
+                </n-button>
+              </n-space>
             </div>
             <n-alert v-if="!editingId" type="warning" :bordered="false">{{ t('请先保存 MCP 服务，再发现远程 tools。') }}</n-alert>
             <div class="mcp-tools">
-              <n-space vertical>
-                <n-checkbox
-                  v-for="tool in discoveredTools"
-                  :key="tool.name"
-                  :checked="selectedMcpToolNames.includes(tool.name)"
-                  @update:checked="(checked: boolean) => toggleMcpTool(tool.name, checked)"
-                >
-                  <div class="mcp-tool-option">
-                    <div class="mcp-tool-option-name">{{ tool.name }}</div>
-                    <div v-if="governanceFor(tool.name)" class="mcp-governance-tags">
-                      <n-tag size="small" :type="governanceRiskTagType(governanceFor(tool.name)!.risk_level)" :bordered="false">
-                        {{ governanceRiskLabel(governanceFor(tool.name)!.risk_level) }}
-                      </n-tag>
-                      <n-tag size="small" :type="governanceFor(tool.name)!.approval_required ? 'warning' : 'success'" :bordered="false">
-                        {{ governanceFor(tool.name)!.approval_required ? t('治理预览：需审批') : t('治理预览：无需审批') }}
-                      </n-tag>
+              <div v-if="discoveredTools.length" class="mcp-tools-scroll">
+                <n-space vertical :size="12">
+                  <n-checkbox
+                    v-for="tool in discoveredTools"
+                    :key="tool.name"
+                    :checked="selectedMcpToolNames.includes(tool.name)"
+                    @update:checked="(checked: boolean) => toggleMcpTool(tool.name, checked)"
+                  >
+                    <div class="mcp-tool-option">
+                      <div class="mcp-tool-option-name">{{ tool.name }}</div>
+                      <div v-if="governanceFor(tool.name)" class="mcp-governance-tags">
+                        <n-tag size="small" :type="governanceRiskTagType(governanceFor(tool.name)!.risk_level)" :bordered="false">
+                          {{ governanceRiskLabel(governanceFor(tool.name)!.risk_level) }}
+                        </n-tag>
+                        <n-tag size="small" :type="governanceFor(tool.name)!.approval_required ? 'warning' : 'success'" :bordered="false">
+                          {{ governanceFor(tool.name)!.approval_required ? t('治理预览：需审批') : t('治理预览：无需审批') }}
+                        </n-tag>
+                      </div>
+                      <span v-if="tool.description" class="muted">{{ tool.description }}</span>
                     </div>
-                    <span v-if="tool.description" class="muted">{{ tool.description }}</span>
-                  </div>
-                </n-checkbox>
-              </n-space>
+                  </n-checkbox>
+                </n-space>
+              </div>
               <span v-if="!discoveredTools.length" class="muted">{{ t('还没有发现 MCP tools。') }}</span>
             </div>
           </section>
@@ -347,7 +368,13 @@
           </template>
           <template v-else>
             <n-form-item :label="t('MCP 工具')">
-              <n-select v-model:value="debugMcpToolName" :options="mcpToolOptions" filterable size="small" />
+              <n-select
+                v-model:value="debugMcpToolName"
+                :options="mcpToolOptions"
+                filterable
+                size="small"
+                :menu-props="{ style: { maxHeight: '280px' } }"
+              />
             </n-form-item>
             <n-form-item :label="t('参数 JSON')">
               <n-input v-model:value="debugMcpArguments" type="textarea" :autosize="{ minRows: 4, maxRows: 8 }" placeholder='{"key":"value"}' />
@@ -483,7 +510,13 @@ import {
 } from '../api/tools'
 import { formatAppShortDateTime, parseAppDate } from '../composables/appTimezone'
 import { useMcpGovernancePreview } from '../composables/useMcpGovernancePreview'
-import { enabledMcpToolNames, mcpActivationError, nextMcpToolSelection, toolStatusConfirmText } from '../utils/toolActivation'
+import {
+  enabledMcpToolNames,
+  MCP_ENABLED_TOOL_LIMIT,
+  mcpActivationError,
+  nextMcpToolSelection,
+  toolStatusConfirmText,
+} from '../utils/toolActivation'
 import type { ToolGovernancePreviewItem } from '../api/tools'
 
 type SchemaType = 'String' | 'Integer' | 'Number' | 'Boolean' | 'Object' | 'Array' | 'ArrayObject'
@@ -668,6 +701,16 @@ function governanceRiskTagType(risk: ToolGovernancePreviewItem['risk_level']): '
   return 'success'
 }
 const selectedMcpToolNames = computed(() => enabledMcpToolNames(form.value.config))
+const discoveredMcpToolNames = computed(() => discoveredTools.value
+  .map((tool) => String(tool.name || '').trim())
+  .filter(Boolean))
+const allMcpToolsSelected = computed(() => {
+  const names = discoveredMcpToolNames.value
+  if (!names.length) return false
+  const selected = new Set(selectedMcpToolNames.value)
+  return names.every((name) => selected.has(name))
+})
+const hasMcpToolSelection = computed(() => selectedMcpToolNames.value.length > 0)
 const enabledSwitch = computed({
   get: () => form.value.status === 'active',
   set: (value: boolean) => {
@@ -1474,6 +1517,26 @@ function toggleMcpTool(name: string, checked: boolean) {
   form.value.config.enabledToolNames = next.names
 }
 
+/** 将已发现的 MCP 工具全部加入启用列表（受上限约束）。 */
+function selectAllMcpTools() {
+  const names = discoveredMcpToolNames.value
+  if (!names.length) return
+  if (names.length > MCP_ENABLED_TOOL_LIMIT) {
+    form.value.config.enabledToolNames = names.slice(0, MCP_ENABLED_TOOL_LIMIT)
+    message.warning(t('发现 {total} 个工具，最多只能选择 {limit} 个，已自动选中前 {limit} 个。', {
+      total: names.length,
+      limit: MCP_ENABLED_TOOL_LIMIT,
+    }))
+    return
+  }
+  form.value.config.enabledToolNames = [...names]
+}
+
+/** 清空当前已选 MCP 工具。 */
+function clearAllMcpTools() {
+  form.value.config.enabledToolNames = []
+}
+
 async function toggleStatus(row: ExternalToolItem, enabled: boolean) {
   if (!props.userId) return
   const error = mcpActivationError({ ...row, status: enabled ? 'active' : 'disabled' })
@@ -2126,6 +2189,25 @@ watch(() => [props.userId, props.mainId], () => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+
+.mcp-tools-count {
+  white-space: nowrap;
+}
+
+.mcp-tools-scroll {
+  flex: 1;
+  min-height: 160px;
+  max-height: min(480px, calc(100vh - 360px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 14px;
+  border: 1px solid #e6edf7;
+  border-radius: 8px;
+  background: #fbfdff;
 }
 
 .mcp-tool-option {

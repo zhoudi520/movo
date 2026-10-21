@@ -190,17 +190,28 @@
                 />
               </section>
 
-              <section v-if="activeKey === 'mcpTools'" class="step-panel">
+              <section v-if="activeKey === 'mcpTools'" class="step-panel flex-panel">
                 <div class="section-head">
                   <div>
                     <div class="section-title">{{ t('发现 MCP 工具') }}</div>
                     <div class="section-muted">{{ t('保存连接后发现远程服务暴露的工具，并选择允许 Agent 使用的项。') }}</div>
                     <div class="section-muted">{{ t('审批与风险标签按运行时 Tool Profile 规则预览，修改连接 config 后会自动刷新。') }}</div>
                   </div>
-                  <n-button type="primary" :loading="discovering" :disabled="!toolId" @click="discoverTools">
-                    <template #icon><ToolIcon name="search" /></template>
-                    {{ t('发现工具') }}
-                  </n-button>
+                  <n-space :size="8" align="center">
+                    <span v-if="discoveredTools.length" class="section-muted mcp-tools-count">
+                      {{ t('已选 {selected} / {total}', { selected: enabledToolNames.length, total: discoveredTools.length }) }}
+                    </span>
+                    <n-button secondary :disabled="!discoveredTools.length || allMcpToolsSelected" @click="selectAllMcpTools">
+                      {{ t('全选') }}
+                    </n-button>
+                    <n-button secondary :disabled="!discoveredTools.length || !hasMcpToolSelection" @click="clearAllMcpTools">
+                      {{ t('全取消') }}
+                    </n-button>
+                    <n-button type="primary" :loading="discovering" :disabled="!toolId" @click="discoverTools">
+                      <template #icon><ToolIcon name="search" /></template>
+                      {{ t('发现工具') }}
+                    </n-button>
+                  </n-space>
                 </div>
 
                 <n-alert v-if="!toolId" type="warning" :bordered="false">{{ t('请先保存 MCP 服务，再发现远程工具。') }}</n-alert>
@@ -258,7 +269,12 @@
                     </template>
                     <template v-else>
                       <n-form-item :label="t('MCP 工具')">
-                        <n-select v-model:value="debugMcpToolName" :options="mcpToolOptions" filterable />
+                        <n-select
+                          v-model:value="debugMcpToolName"
+                          :options="mcpToolOptions"
+                          filterable
+                          :menu-props="{ style: { maxHeight: '280px' } }"
+                        />
                       </n-form-item>
                       <n-form-item :label="t('参数 JSON')">
                         <n-input v-model:value="debugMcpArguments" type="textarea" :autosize="{ minRows: 8, maxRows: 14 }" :placeholder="t('mcp_placeholder')" />
@@ -321,7 +337,13 @@
             </template>
             <template v-else>
               <n-form-item :label="t('MCP 工具')">
-                <n-select v-model:value="debugMcpToolName" :options="mcpToolOptions" filterable size="small" />
+                <n-select
+                  v-model:value="debugMcpToolName"
+                  :options="mcpToolOptions"
+                  filterable
+                  size="small"
+                  :menu-props="{ style: { maxHeight: '280px' } }"
+                />
               </n-form-item>
               <n-form-item :label="t('参数 JSON')">
                 <n-input v-model:value="debugMcpArguments" type="textarea" :autosize="{ minRows: 4, maxRows: 8 }" :placeholder="t('mcp_placeholder')" />
@@ -429,7 +451,12 @@ import {
   type ToolPayload,
   type ToolType,
 } from '@/api/tools';
-import { mcpActivationError, nextMcpToolSelection, toolStatusConfirmText } from '@/utils/toolActivation';
+import {
+  MCP_ENABLED_TOOL_LIMIT,
+  mcpActivationError,
+  nextMcpToolSelection,
+  toolStatusConfirmText,
+} from '@/utils/toolActivation';
 
 type SchemaType = 'String' | 'Integer' | 'Number' | 'Boolean' | 'Object' | 'Array' | 'ArrayObject';
 type ParamLocation = 'Header' | 'Query' | 'Body' | 'Path';
@@ -701,6 +728,16 @@ const activeKey = computed(() => steps.value[activeStep.value - 1]?.key || 'base
 const currentStep = computed(() => steps.value[activeStep.value - 1]);
 const flatInputNodes = computed<FlatInputNode[]>(() => flattenSchema(inputSchema.value));
 const mcpToolOptions = computed(() => discoveredTools.value.map((tool) => ({ label: tool.name, value: tool.name })));
+const discoveredMcpToolNames = computed(() => discoveredTools.value
+  .map((tool) => String(tool.name || '').trim())
+  .filter(Boolean));
+const allMcpToolsSelected = computed(() => {
+  const names = discoveredMcpToolNames.value;
+  if (!names.length) return false;
+  const selected = new Set(enabledToolNames.value);
+  return names.every((name) => selected.has(name));
+});
+const hasMcpToolSelection = computed(() => enabledToolNames.value.length > 0);
 const groupedDebugNodes = computed(() => {
   const groups = [
     { location: 'Path', label: 'Path', nodes: [] as FlatInputNode[] },
@@ -1436,6 +1473,29 @@ function toggleMcpTool(name: string, checked: boolean) {
   form.config.enabledToolNames = enabledToolNames.value;
 }
 
+/** 将已发现的 MCP 工具全部加入启用列表（受上限约束）。 */
+function selectAllMcpTools() {
+  const names = discoveredMcpToolNames.value;
+  if (!names.length) return;
+  if (names.length > MCP_ENABLED_TOOL_LIMIT) {
+    enabledToolNames.value = names.slice(0, MCP_ENABLED_TOOL_LIMIT);
+    form.config.enabledToolNames = enabledToolNames.value;
+    message.warning(t('发现 {total} 个工具，最多只能选择 {limit} 个，已自动选中前 {limit} 个。', {
+      total: names.length,
+      limit: MCP_ENABLED_TOOL_LIMIT,
+    }));
+    return;
+  }
+  enabledToolNames.value = [...names];
+  form.config.enabledToolNames = enabledToolNames.value;
+}
+
+/** 清空当前已选 MCP 工具。 */
+function clearAllMcpTools() {
+  enabledToolNames.value = [];
+  form.config.enabledToolNames = [];
+}
+
 function parseDebugValue(value: string, type: SchemaType) {
   if (type === 'Number' || type === 'Integer') return Number(value);
   if (type === 'Boolean') return value === 'true';
@@ -1802,11 +1862,26 @@ watch(
   overflow: hidden;
 }
 
-.compact-table,
-.mcp-tool-list {
+.compact-table {
   border: 1px solid #e5ebf5;
   border-radius: 8px;
   overflow: hidden;
+}
+
+.mcp-tools-count {
+  white-space: nowrap;
+}
+
+.mcp-tool-list {
+  border: 1px solid #e5ebf5;
+  border-radius: 8px;
+  flex: 1;
+  min-height: 160px;
+  max-height: min(480px, calc(100vh - 360px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #fbfdff;
 }
 
 :deep(.schema-editor) {
