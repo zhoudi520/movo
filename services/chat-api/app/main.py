@@ -115,7 +115,6 @@ from app.api.endpoints import (
     dsh_model_gateway,
     dsh_tool_gateway,
     external_tools,
-    jira_mcp,
     knowledge_sources,
     knowledge_source_config,
     models,
@@ -151,7 +150,6 @@ app.include_router(documents.router, prefix="/api")
 app.include_router(knowledge_sources.router, prefix="/api")
 app.include_router(knowledge_source_config.router, prefix="/api")
 app.include_router(external_tools.router, prefix="/api")
-app.include_router(jira_mcp.router, prefix="/api")
 app.include_router(models.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")
 app.include_router(product.router, prefix="/api")

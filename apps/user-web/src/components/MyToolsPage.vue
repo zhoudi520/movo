@@ -14,8 +14,6 @@
         </n-card>
       </div>
 
-      <JiraMcpUserSettings />
-
       <n-card class="list-card shell-card" :bordered="false" size="large">
         <div class="list-filter-row">
           <div class="filter-toolbar">
@@ -426,7 +424,6 @@
 </template>
 
 <script setup lang="ts">
-import JiraMcpUserSettings from './JiraMcpUserSettings.vue'
 import { t } from '../composables/i18n'
 import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
 import {

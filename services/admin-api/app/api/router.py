@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.routes import analytics, auth, dashboard, directory, directory_scope, dsh_plugins, external_search, invite_history, invite_members, jira_mcp_gateway, jira_mcp_gateway_internal, knowledge_directories, knowledge_documents, knowledge_settings, knowledge_source_settings, models, organizations, page_collection, personal_knowledge_internal, position_roles, presentation_settings, setup, shortcut_settings, skill_lifecycle, skills, system, system_audit, tools, traffic_allocations, topic_admission
+from app.api.routes import analytics, auth, dashboard, directory, directory_scope, dsh_plugins, external_search, invite_history, invite_members, knowledge_directories, knowledge_documents, knowledge_settings, knowledge_source_settings, models, organizations, page_collection, personal_knowledge_internal, position_roles, presentation_settings, setup, shortcut_settings, skill_lifecycle, skills, system, system_audit, tools, traffic_allocations, topic_admission
 
 api_router = APIRouter()
 api_router.include_router(system.router, tags=["system"])
@@ -26,8 +26,6 @@ api_router.include_router(skills.router, prefix="/skills", tags=["skills"])
 api_router.include_router(dsh_plugins.router, prefix="/dsh-plugins", tags=["dsh-plugins"])
 api_router.include_router(skill_lifecycle.router, prefix="/skills", tags=["skills"])
 api_router.include_router(tools.router, prefix="/tools", tags=["tools"])
-api_router.include_router(jira_mcp_gateway.router, prefix="/settings/jira-mcp-gateway", tags=["jira-mcp-gateway"])
-api_router.include_router(jira_mcp_gateway_internal.router, prefix="/internal/jira-mcp-gateway", tags=["jira-mcp-gateway-internal"])
 api_router.include_router(external_search.router, prefix="/settings/external-search", tags=["external-search"])
 api_router.include_router(page_collection.router, prefix="/settings/page-collection", tags=["page-collection"])
 api_router.include_router(presentation_settings.router, prefix="/settings/presentation", tags=["presentation-settings"])

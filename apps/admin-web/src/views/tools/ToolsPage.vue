@@ -84,7 +84,6 @@
           </n-space>
           <n-space :size="10" class="filter-right">
             <n-button secondary @click="loadRows">{{ t('刷新') }}</n-button>
-            <n-button @click="goJiraGateway">{{ t('Jira MCP 网关') }}</n-button>
             <n-button @click="goCreate('mcp')">{{ t('新增 MCP 服务') }}</n-button>
             <n-button type="primary" strong @click="goCreate('http')">{{ t('新增 HTTP 工具') }}</n-button>
           </n-space>
@@ -270,10 +269,6 @@ const metricCards = computed(() => {
     { key: 'pass', icon: '测', label: t('测试通过'), value: passedCount, note: t('最近测试通过数量') },
   ];
 });
-
-function goJiraGateway() {
-  router.push({ name: 'JiraMcpGateway' });
-}
 
 function goCreate(type: ToolType) {
   router.push({ path: '/tools/new', query: { type } });

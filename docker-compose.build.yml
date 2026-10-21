@@ -58,9 +58,3 @@ services:
     build:
       context: ./deploy/docker
       dockerfile: gateway.Dockerfile
-
-  jira-mcp-gateway:
-    pull_policy: build
-    build:
-      context: ./services/jira-mcp-gateway
-      dockerfile: Dockerfile

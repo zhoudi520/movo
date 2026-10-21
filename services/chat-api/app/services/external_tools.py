@@ -154,7 +154,7 @@ def _merged_tool_state(existing: Dict[str, Any] | None, patch: Dict[str, Any]) -
 class ExternalToolService:
     @staticmethod
     def _mcp_runtime_headers(main_id: str, actor_user_id: str = "") -> Dict[str, str]:
-        """Build trusted tenant/user headers for MCP calls (e.g. Jira MCP gateway)."""
+        """Build trusted tenant/user headers for tenant-aware MCP calls."""
         resolved = resolve_main_id(main_id)
         headers = {
             "X-MOVO-Main-ID": resolved,

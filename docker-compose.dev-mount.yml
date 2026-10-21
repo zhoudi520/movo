@@ -1,7 +1,7 @@
 # Bind-mount application source for local iteration without rebuilding images.
 #
 # Python APIs use uvicorn --reload (save file → process reloads; no container restart).
-# DSH / Jira MCP: mount source only — restart the service after edits.
+# DSH: mount source only — restart the service after edits.
 # document-worker (Celery): mount app — restart document-worker after Python edits.
 #
 # Frontend (admin-web / user-web) images serve pre-built dist via nginx; use host dev instead:
@@ -71,7 +71,3 @@ services:
     volumes:
       - ./services/chat-api/dsh/runtime-host/src:/app/src:ro
       - ./services/chat-api/dsh/runtime-host/config:/app/config:ro
-
-  jira-mcp-gateway:
-    volumes:
-      - ./services/jira-mcp-gateway/server.mjs:/app/server.mjs:ro

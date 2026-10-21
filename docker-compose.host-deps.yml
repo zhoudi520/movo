@@ -8,9 +8,6 @@
 # Infra + DSH only (host chat-api via run_backends):
 #   docker compose -f docker-compose.yml -f docker-compose.host-deps.yml up -d bootstrap mongo redis weaviate dsh-runtime-host
 #
-# Optional Jira MCP gateway (host chat-api uses http://127.0.0.1:8766/mcp):
-#   docker compose -f docker-compose.yml -f docker-compose.host-deps.yml up -d jira-mcp-gateway
-#
 # Full stack in Docker with loopback ports (e.g. host Vite + container APIs):
 #   docker compose -f docker-compose.yml -f docker-compose.build.yml -f docker-compose.host-deps.yml up -d
 #
@@ -57,21 +54,6 @@ services:
       # chat-api runs on the host; container DSH must call back via host gateway.
       DSH_MODEL_GATEWAY_URL: http://host.docker.internal:${MOVO_HOST_BACKEND_PORT:-8000}/internal/dsh/model/generate
       DSH_TOOL_GATEWAY_URL: http://host.docker.internal:${MOVO_HOST_BACKEND_PORT:-8000}/internal/dsh/tools
-
-  jira-mcp-gateway:
-    depends_on:
-      bootstrap:
-        condition: service_completed_successfully
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      # Hybrid: admin-api on host (run_backends); gateway polls runtime-config over host gateway.
-      ADMIN_API_BASE_URL: http://host.docker.internal:${MOVO_HOST_ADMIN_PORT:-8100}
-    ports:
-      - "127.0.0.1:${MOVO_JIRA_MCP_PORT:-8766}:8766"
-    networks:
-      - backend
-      - public
 
   chat-api:
     ports:
