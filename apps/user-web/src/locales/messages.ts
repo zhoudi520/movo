@@ -11,6 +11,13 @@ export type Locale = 'zh' | 'en'
 export type MessageValue = string | Record<Locale, string>
 
 export const messages = {
+  'chat.question.title': { zh: '需要你的回答', en: 'Your input is needed' },
+  'chat.question.subtitle': { zh: '回答后，助手会继续处理当前问题', en: 'The assistant will continue after you answer' },
+  'chat.question.other': { zh: '填写其他答案', en: 'Enter another answer' },
+  'chat.question.placeholder': { zh: '请输入你的回答', en: 'Type your answer' },
+  'chat.question.submit': { zh: '提交回答', en: 'Submit answer' },
+  'chat.question.submitting': { zh: '正在提交…', en: 'Submitting…' },
+  'chat.question.answered': { zh: '已回答提问', en: 'Questions answered' },
   'code.permission.heading': { zh: '应如何批准 MOVO 操作？', en: 'How should MOVO approve actions?' },
   'code.permission.ask': { zh: '请求批准', en: 'Ask for approval' },
   'code.permission.askHint': { zh: '编辑项目外文件等越界操作需要你批准', en: 'Ask before actions outside the project file sandbox' },
@@ -611,7 +618,14 @@ export const messages = {
   'chat.doc_preview': { zh: '文档预览', en: 'Document Preview' },
   'chat.regenerate': { zh: '重新生成', en: 'Regenerate' },
   'chat.regenerating': { zh: '生成中...', en: 'Generating...' },
+  'chat.regenerate_success': { zh: '文档已重新生成。可点击“下载”获取新版本。', en: 'Document regenerated. Click Download to get the new version.' },
+  'chat.regenerate_warning': { zh: 'Word 已重新生成，但编辑稿未保存；可先下载新版本。', en: 'Word regenerated, but the editable source was not saved. You can download the new version.' },
+  'chat.regenerate_error': { zh: '重新生成失败，请重试。', en: 'Regeneration failed. Please retry.' },
+  'chat.regenerate_failed': { zh: '重新生成失败，请重试。', en: 'Regeneration failed. Please retry.' },
+  'chat.regenerate_source_warning': { zh: 'Word 已生成，但 Markdown 编辑稿保存失败。', en: 'Word was generated, but the Markdown edit source could not be saved.' },
   'chat.markdown_edit': { zh: 'Markdown 编辑', en: 'Markdown Edit' },
+  'chat.docx_edit_source_failed': { zh: '无法读取 Word 文档的可编辑内容，请重试。', en: 'Could not load editable Word content. Please retry.' },
+  'chat.docx_edit_source_empty': { zh: 'Word 文档没有可编辑的内容。', en: 'This Word document has no editable content.' },
   'chat.preview_panel': { zh: '预览', en: 'Preview' },
   'chat.reopen_preview': { zh: '恢复预览', en: 'Reopen Preview' },
 

@@ -14,6 +14,7 @@ import { NativePluginRegistry } from './native-plugin-registry.mjs'
 import { ManagedPluginBridge } from './managed-plugin-bridge.mjs'
 import { AskaiToolBridge } from './askai-tool-bridge-plugin.mjs'
 import { AskaiWebSearchProvider } from './askai-web-search-provider.mjs'
+import { hasConfiguredWebSearch } from './web-search-availability.mjs'
 import { RuntimeTemporalContext } from './runtime-temporal-context.mjs'
 import { RuntimeTurnContext } from './runtime-turn-context.mjs'
 import { RuntimeEndUserContext } from './runtime-end-user-context.mjs'
@@ -33,6 +34,7 @@ import { DshWorkspaceService } from './workspace-service.mjs'
 import { cancelSessionWork } from './session-cancellation.mjs'
 import { DesktopApprovalBroker } from './desktop-approval-broker.mjs'
 import { CodeApprovalReviewer } from './code-approval-reviewer.mjs'
+import { UserQuestionBroker } from './user-question-broker.mjs'
 import { codePermissionPolicy } from './code-permission-policy.mjs'
 import { registerAskaiSkillProvider } from './askai-skill-provider.mjs'
 import { invokeSelectedSkill, resolveSkillTurnContext } from './skill-turn-selection.mjs'
@@ -58,6 +60,7 @@ export class KernelRuntime {
   #sessionComposer
   #workspaces
   #desktopApprovals
+  #userQuestions
   #skillProviderDispose
   #skillProvider
   #skillResourceToolDispose
@@ -77,10 +80,17 @@ export class KernelRuntime {
     await mkdir(this.storageRoot, { recursive: true })
     this.#composition = new OfficialDshHostComposition({
       storageRoot: this.storageRoot,
-      webSearchProvider: this.modelProfile?.toolProfile === undefined ? undefined : 'askai-enterprise',
+      webSearchProvider: hasConfiguredWebSearch(this.modelProfile) ? 'askai-enterprise' : undefined,
       plugins: this.modelProfile?.plugins,
     })
     const ctx = await this.#composition.start()
+    if (this.#composition.unavailablePlugins.length > 0) {
+      console.warn('MOVO Runtime omitted incompatible DSH plugins:', this.#composition.unavailablePlugins)
+      this.modelProfile = Object.freeze({
+        ...this.modelProfile,
+        plugins: this.#composition.availablePlugins,
+      })
+    }
     this.#ctx = ctx
     this.#managedPlugins = new ManagedPluginBridge(ctx)
     this.#temporalContext.install(ctx)
@@ -101,7 +111,7 @@ export class KernelRuntime {
           provider: skillProviderRegistration.provider,
           invocations: this.#skillInvocations,
         })
-    if (this.modelProfile?.toolProfile !== undefined) {
+    if (hasConfiguredWebSearch(this.modelProfile)) {
       this.#webSearchProvider = new AskaiWebSearchProvider(ctx, {
         ...this.modelProfile.toolProfile,
         profileVersion: this.profileVersion,
@@ -117,6 +127,7 @@ export class KernelRuntime {
       excludedTools: enterpriseToolNames(this.modelProfile),
       automaticReviewer: new CodeApprovalReviewer(this.#modelAdapter, this.modelProfile),
     })
+    this.#userQuestions = new UserQuestionBroker(ctx)
     if (this.modelProfile?.toolProfile !== undefined) {
       this.#toolBridge = new AskaiToolBridge(ctx, {
         ...this.modelProfile.toolProfile,
@@ -260,6 +271,16 @@ export class KernelRuntime {
     return this.#desktopApprovals.decide(sessionId, approvalId, outcome, grantScope)
   }
 
+  pendingQuestions(sessionId) {
+    this.#requireAgent(sessionId)
+    return this.#userQuestions.list(sessionId)
+  }
+
+  answerQuestion(sessionId, questionId, answers) {
+    this.#requireAgent(sessionId)
+    return this.#userQuestions.answer(sessionId, questionId, answers)
+  }
+
   events(sessionId, afterCursor) {
     this.#requireAgent(sessionId)
     return this.#journal.replay(sessionId, afterCursor)
@@ -331,6 +352,7 @@ export class KernelRuntime {
     this.#temporalContext.remove(sessionId)
     this.#turnContext.remove(sessionId)
     this.#desktopApprovals.clearSession(sessionId)
+    this.#userQuestions.clearSession(sessionId)
     await handle.agent.whenIdle()
     await handle.dispose()
     this.#liveAssistantStream.remove(sessionId)
@@ -377,6 +399,7 @@ export class KernelRuntime {
     }
     this.#modelAdapterDispose?.()
     this.#desktopApprovals?.dispose()
+    this.#userQuestions?.dispose()
     this.#toolBridge?.dispose()
     this.#webSearchDispose?.()
     this.#skillResourceToolDispose?.()

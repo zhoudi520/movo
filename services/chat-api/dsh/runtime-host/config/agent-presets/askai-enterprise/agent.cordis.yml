@@ -19,3 +19,8 @@
 # copy Skill content into the generic system prompt.
 - id: tool-skill
   name: '@deepseek-ai/dsh-tool-skill'
+
+# The same native question tool used by DSH Code sessions. MOVO supplies the
+# answer surface through the Runtime Host rather than duplicating the tool.
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'

@@ -84,6 +84,21 @@ class DocumentFetchRequest(BaseModel):
     object_path: str = Field(..., description="OSS object path")
 
 
+@router.post("/documents/edit-source", dependencies=[Depends(require_end_user_principal)])
+async def document_edit_source(payload: DocumentFetchRequest):
+    from app.services.document_edit_source import docx_markdown_source
+
+    try:
+        markdown = await docx_markdown_source(
+            object_path=unquote(payload.object_path), user_id=payload.user_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(content=markdown, media_type="text/markdown; charset=utf-8")
+
+
 class PresentationPptxRenderRequest(BaseModel):
     user_id: str = Field(..., description="User ID from login")
     blueprint_object_path: str = Field(..., description="blueprint JSON artifact path in OSS")

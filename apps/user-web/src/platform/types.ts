@@ -156,6 +156,28 @@ export interface DshPendingApproval {
   created_at: number
 }
 
+export interface DshUserQuestion {
+  id: string
+  question: string
+  detail?: string
+  header?: string
+  options?: Array<{ label: string; description?: string }>
+  multiSelect?: boolean
+}
+
+export interface DshPendingQuestion {
+  id: string
+  sessionId: string
+  questions: DshUserQuestion[]
+  createdAt: number
+}
+
+export interface DshQuestionAnswer {
+  id: string
+  selected: string[]
+  custom?: string
+}
+
 export interface DshWorkspaceInspection {
   generated_at: number
   branch: string

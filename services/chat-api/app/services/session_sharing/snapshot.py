@@ -17,6 +17,20 @@ def snapshot_messages(
         if row.get("message_type") == "context_summary" or row.get("role") not in {"user", "assistant"}:
             continue
         role = str(row.get("role"))
+        if role == "assistant":
+            for entry in row.get("question_answers") or []:
+                answers = {answer.get("id"): answer for answer in entry.get("answers") or []}
+                lines = []
+                for question in entry.get("questions") or []:
+                    answer = answers.get(question.get("id")) or {}
+                    values = [*answer.get("selected", []), answer.get("custom")]
+                    lines.append(f"{question.get('question', '')}\n{', '.join(str(value) for value in values if value)}")
+                if lines:
+                    messages.append({
+                        "role": "user", "content": "\n\n".join(lines),
+                        "created_at": entry.get("created_at") or row.get("created_at"),
+                        "author_name": str((author_names.get(str(entry.get("user_id") or owner_user_id)) or {}).get("display_name") or ""),
+                    })
         item = {
             "role": str(row.get("role") or ""),
             "content": str(row.get("content") or ""),

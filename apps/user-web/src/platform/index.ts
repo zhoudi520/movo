@@ -54,6 +54,8 @@ export const subscribeDshCodeEvents: (sessionId: string, after?: number) => Prom
 export const unsubscribeDshCodeEvents: (sessionId: string) => Promise<{ unsubscribed: boolean }> = impl.unsubscribeDshCodeEvents
 export const onDshCodeEvent: (listener: (sessionId: string, event: DshExecutionEvent) => void) => () => void = impl.onDshCodeEvent
 export const listDshCodeApprovals: (sessionId: string) => Promise<DshPendingApproval[]> = impl.listDshCodeApprovals
+export const listDshCodeQuestions: (sessionId: string) => Promise<import('./types').DshPendingQuestion[]> = impl.listDshCodeQuestions
+export const answerDshCodeQuestion: (sessionId: string, questionId: string, answers: import('./types').DshQuestionAnswer[]) => Promise<{ answered: boolean }> = impl.answerDshCodeQuestion
 export const inspectDshCodeWorkspace: (sessionId: string) => Promise<DshWorkspaceInspection> = impl.inspectDshCodeWorkspace
 export const getDshWorkspaceSummary: (sessionId: string) => Promise<DshWorkspaceSummary> = impl.getDshWorkspaceSummary
 export const listDshWorkspaceDirectory: (sessionId: string, path?: string) => Promise<DshDirectoryEntry[]> = impl.listDshWorkspaceDirectory

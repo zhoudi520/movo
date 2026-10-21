@@ -225,7 +225,7 @@ const completedHtml = renderAssistantMarkdown(streamed)
 
   const unsafe = renderAssistantMarkdown('[危险链接](javascript:alert(1))')
   assert.doesNotMatch(unsafe, /<a href=/)
-  assert.match(unsafe, /javascript:alert/)
+  assert.equal(unsafe, '危险链接')
 }
 
 {

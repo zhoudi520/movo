@@ -32,6 +32,8 @@ interface ElectronApi {
     unsubscribe(sessionId: string): Promise<{ unsubscribed: boolean }>
     onEvent(listener: (sessionId: string, event: DshExecutionEvent) => void): () => void
     approvals(sessionId: string): Promise<DshPendingApproval[]>
+    questions(sessionId: string): Promise<import('./types').DshPendingQuestion[]>
+    answerQuestion(sessionId: string, questionId: string, answers: import('./types').DshQuestionAnswer[]): Promise<{ answered: boolean }>
     inspect(sessionId: string): Promise<DshWorkspaceInspection>
     summary(sessionId: string): Promise<DshWorkspaceSummary>
     listDirectory(sessionId: string, path?: string): Promise<DshDirectoryEntry[]>
@@ -133,6 +135,9 @@ export const subscribeDshCodeEvents = (sessionId: string, after?: number) => api
 export const unsubscribeDshCodeEvents = (sessionId: string) => api().dshCodeSession.unsubscribe(sessionId)
 export const onDshCodeEvent = (listener: (sessionId: string, event: DshExecutionEvent) => void) => api().dshCodeSession.onEvent(listener)
 export const listDshCodeApprovals = (sessionId: string) => api().dshCodeSession.approvals(sessionId)
+export const listDshCodeQuestions = (sessionId: string) => api().dshCodeSession.questions(sessionId)
+export const answerDshCodeQuestion = (sessionId: string, questionId: string, answers: import('./types').DshQuestionAnswer[]) =>
+  api().dshCodeSession.answerQuestion(sessionId, questionId, answers)
 export const inspectDshCodeWorkspace = (sessionId: string) => api().dshCodeSession.inspect(sessionId)
 export const getDshWorkspaceSummary = (sessionId: string) => api().dshCodeSession.summary(sessionId)
 export const listDshWorkspaceDirectory = (sessionId: string, path = '') => api().dshCodeSession.listDirectory(sessionId, path)

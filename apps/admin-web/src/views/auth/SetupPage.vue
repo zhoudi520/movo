@@ -172,9 +172,9 @@ const optionalModelForms = ref<SetupOptionalModelForm[]>([
 
 const searchForm = reactive<SetupSearchForm>({
   enabled: false,
-  provider: 'tavily',
+  provider: 'deepseek',
   apiKey: '',
-  endpoint: '',
+  endpoint: 'https://api.deepseek.com/v1/tools/search',
   baseUrl: '',
   model: '',
   query: 'MOVO enterprise AI',

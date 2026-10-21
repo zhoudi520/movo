@@ -32,7 +32,7 @@ class SearchProviderPayload(BaseModel):
 
 
 class SearchProviderTestPayload(BaseModel):
-    query: str = Field(default="OpenAI latest news", max_length=300)
+    query: str = Field(default="DeepSeek latest news", max_length=300)
     apiKey: str = Field(default="", max_length=1000)
     endpoint: str = Field(default="", max_length=500)
     baseUrl: str = Field(default="", max_length=500)
@@ -70,11 +70,22 @@ def _api_key_from_config(config: dict[str, Any]) -> str:
 
 
 def _effective_default_provider(docs: list[dict[str, Any]]) -> str:
-    doc_map = {str(doc.get("provider") or ""): doc for doc in docs if doc.get("is_default") and doc.get("enabled")}
-    for provider in PROVIDERS:
-        if provider in doc_map:
-            return provider
-    return ""
+    usable = [
+        doc for doc in docs
+        if doc.get("enabled") and doc.get("provider") in PROVIDERS
+        and _config(doc).get("api_key_encrypted")
+    ]
+    if not usable:
+        return ""
+    selected = min(
+        usable,
+        key=lambda doc: (
+            not bool(doc.get("is_default")),
+            int(doc.get("priority") or PROVIDERS[str(doc["provider"])]["priority"]),
+            str(doc.get("provider") or ""),
+        ),
+    )
+    return str(selected["provider"])
 
 
 def _serialize(provider: str, doc: dict[str, Any] | None, *, default_provider: str | None = None) -> dict[str, Any]:
@@ -134,26 +145,30 @@ async def save_external_search_provider(
                 config[key] = existing_config[key]
     now = _now()
     doc_id = str((existing or {}).get("_id") or uuid.uuid4().hex)
+    default_doc = await get_db()[COLLECTION].find_one({"main_id": main_id, "enabled": True, "is_default": True}) if payload.enabled else None
+    is_default = bool(payload.enabled and (not default_doc or default_doc.get("provider") == provider))
+    insert_fields = {
+        "_id": doc_id,
+        "main_id": main_id,
+        "provider": provider,
+        "health_status": "untested",
+        "last_error": "",
+        "created_at": now,
+    }
+    # MongoDB rejects an update that puts the same path in $set and
+    # $setOnInsert, even when the document already exists.
     await get_db()[COLLECTION].update_one(
         {"main_id": main_id, "provider": provider},
         {
             "$set": {
                 "enabled": bool(payload.enabled),
+                "is_default": is_default,
                 "config": config,
                 "priority": int(PROVIDERS[provider]["priority"]),
-                **({"is_default": False} if not payload.enabled else {}),
                 "updated_by": str(current_user.get("username") or ""),
                 "updated_at": now,
             },
-            "$setOnInsert": {
-                "_id": doc_id,
-                "main_id": main_id,
-                "provider": provider,
-                "is_default": False,
-                "health_status": "untested",
-                "last_error": "",
-                "created_at": now,
-            },
+            "$setOnInsert": insert_fields,
         },
         upsert=True,
     )
@@ -169,12 +184,12 @@ async def set_default_external_search_provider(
     provider = _provider_or_404(provider)
     main_id = _main_id(current_user)
     doc = await _load_provider_doc(main_id, provider)
-    if not doc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先保存搜索源配置")
+    if not doc or not doc.get("enabled"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先保存并启用搜索源")
     await get_db()[COLLECTION].update_many({"main_id": main_id}, {"$set": {"is_default": False, "updated_at": _now()}})
     await get_db()[COLLECTION].update_one(
         {"main_id": main_id, "provider": provider},
-        {"$set": {"is_default": True, "enabled": True, "updated_at": _now()}},
+        {"$set": {"is_default": True, "updated_at": _now()}},
     )
     return {"success": True}
 
@@ -190,7 +205,7 @@ async def test_external_search_provider(
     doc = await _load_provider_doc(main_id, provider)
     config = _config(doc)
     api_key = payload.apiKey.strip() or _api_key_from_config(config)
-    query = payload.query.strip() or "OpenAI latest news"
+    query = payload.query.strip() or "DeepSeek latest news"
     try:
         effective = normalized_config(
             provider,

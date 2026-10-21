@@ -244,8 +244,8 @@ test('ordinary and code sessions use isolated official preset capability surface
       await runtime.start()
       const ordinary = await runtime.createSession({ sessionId: 'ordinary' })
       assert.equal(ordinary.presetId, ASKAI_ENTERPRISE_PRESET_ID)
-      assert.deepEqual(ordinary.modelTools, [])
-      assert.deepEqual(ordinary.capabilityTools, [])
+      assert.ok(ordinary.modelTools.includes('ask_user_question'))
+      assert.ok(ordinary.capabilityTools.includes('ask_user_question'))
 
       const code = await runtime.createSession({
         sessionId: 'code',
@@ -254,6 +254,7 @@ test('ordinary and code sessions use isolated official preset capability surface
       })
       assert.equal(code.presetId, DSH_CODE_PRESET_ID)
       const modelTools = new Set(code.modelTools)
+      assert.ok(modelTools.has('ask_user_question'))
       for (const name of REQUIRED_CODE_CAPABILITIES) assert.ok(modelTools.has(name), name)
       assert.equal(modelTools.has('run_code'), false)
       const capabilities = new Set(code.capabilityTools)
@@ -272,7 +273,7 @@ test('ordinary and code sessions use isolated official preset capability surface
         '@deepseek-ai/dsh-agent-tool-presentation',
       ]) assert.ok(mountedModules.has(moduleName), moduleName)
 
-      assert.deepEqual((await runtime.describeLiveSession('ordinary')).capabilityTools, [])
+      assert.ok((await runtime.describeLiveSession('ordinary')).capabilityTools.includes('ask_user_question'))
     } finally {
       await runtime.dispose()
     }

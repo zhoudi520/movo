@@ -713,6 +713,14 @@ class ScriptPluginExecutor(BaseExecutor):
                 return _open(file, *args, **kwargs)
 
             def _guarded_io_open(file, *args, **kwargs):
+                # pathlib imported after this hook binds io.open as an accessor
+                # method, passing its accessor instance before the real path.
+                if not isinstance(file, (str, bytes, os.PathLike, int)) and args:
+                    file, args = args[0], args[1:]
+                # io.open also accepts already-open descriptors (e.g. pipes
+                # created by subprocess); no filesystem path is opened here.
+                if isinstance(file, int):
+                    return _io_open(file, *args, **kwargs)
                 mode = args[0] if args else kwargs.get("mode", "r")
                 _check_path(file, write=_is_write_mode(mode))
                 return _io_open(file, *args, **kwargs)

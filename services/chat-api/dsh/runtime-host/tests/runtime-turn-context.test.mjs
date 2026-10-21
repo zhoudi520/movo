@@ -12,6 +12,9 @@ test('missing turn context normalizes to a complete automatic-retrieval scope', 
   assert.match(renderTurnContext(context), /retrieval mode is automatic/)
   assert.match(renderTurnContext(context), /language of the user's latest message/)
   assert.match(renderTurnContext(context), /including progress notes before tools/)
+  assert.match(renderTurnContext(context), /MOVO file delivery policy/)
+  assert.match(renderTurnContext(context), /Do not put object_path, sandbox: paths/)
+  assert.match(renderTurnContext(context), /does not restrict ordinary public web links or Markdown image references/)
 })
 
 test('trusted turn context exposes governed references but strips signed URLs', () => {

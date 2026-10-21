@@ -40,7 +40,7 @@ export function resolveArtifactIcon(type: string): string {
 // ---- Built-in registrations ----
 registerArtifact('pdf',  { icon: ICON_PDF,  labelKey: 'artifact.pdf',  actions: ['preview', 'download'] })
 registerArtifact('docx', { icon: ICON_DOCX, labelKey: 'artifact.docx', actions: ['edit', 'download'] })
-registerArtifact('doc',  { icon: ICON_DOCX, labelKey: 'artifact.docx', actions: ['edit', 'download'] })
+registerArtifact('doc',  { icon: ICON_DOCX, labelKey: 'artifact.docx', actions: ['download'] })
 registerArtifact('xlsx', { icon: ICON_XLSX, labelKey: 'artifact.xlsx', actions: ['download'] })
 registerArtifact('xls',  { icon: ICON_XLSX, labelKey: 'artifact.xlsx', actions: ['download'] })
 registerArtifact('pptx', { icon: ICON_PPT,  labelKey: 'artifact.pptx', actions: ['edit', 'preview', 'export', 'download'] })

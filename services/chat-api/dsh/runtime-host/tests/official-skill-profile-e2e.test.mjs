@@ -71,7 +71,7 @@ test('ASKAI Runtime Profile mounts its Skills through the official DSH skill too
   try {
     await runtime.start()
     const session = await runtime.createSession({ sessionId: 'step7-session' })
-    assert.deepEqual(session.modelTools, ['skill'])
+    assert.deepEqual(session.modelTools, ['ask_user_question', 'skill'])
     assert.ok(session.capabilityTools.includes('skill'))
   } finally {
     await runtime.dispose()
@@ -160,7 +160,7 @@ test('official DSH reads a resource from an automatically selected Skill package
   try {
     await runtime.start()
     const session = await runtime.createSession({ sessionId: 'step7-resource-session' })
-    assert.deepEqual(session.modelTools, ['skill', 'skill_resource_read'])
+    assert.deepEqual(session.modelTools, ['ask_user_question', 'skill', 'skill_resource_read'])
     runtime.send({
       sessionId: 'step7-resource-session', mode: 'prompt',
       content: [{ type: 'text', data: { text: '佛山大学招生电话是什么？' } }],
@@ -283,7 +283,7 @@ test('official DSH automatically selects a referenced Skill with a resource bund
   try {
     await runtime.start()
     const session = await runtime.createSession({ sessionId: 'large-skill-session' })
-    assert.deepEqual(session.modelTools, ['skill', 'skill_resource_read'])
+    assert.deepEqual(session.modelTools, ['ask_user_question', 'skill', 'skill_resource_read'])
     runtime.send({
       sessionId: 'large-skill-session', mode: 'prompt',
       content: [{ type: 'text', data: { text: 'Use the large guide.' } }],

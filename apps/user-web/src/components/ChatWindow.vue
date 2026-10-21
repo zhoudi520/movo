@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref, nextTick, onMounted, onUpdated, onBeforeUnmount, watch } from 'vue'
-import { renderDocument, renderPresentationPptx, signDocument, fetchBlueprintJson } from '../api/documents'
+import { useMessage } from 'naive-ui'
+import { renderDocument, renderPresentationPptx, signDocument, fetchBlueprintJson, fetchDocxEditSource } from '../api/documents'
 import BrowserWorkspace from './browser/BrowserWorkspace.vue'
 import LocalBrowserInterventionPrompt from './execution/LocalBrowserInterventionPrompt.vue'
 import ToolApprovalPrompt from './execution/ToolApprovalPrompt.vue'
@@ -11,6 +12,9 @@ import CodeTaskChangeCard from './code/CodeTaskChangeCard.vue'
 import CodeDraftContextBar from './code/CodeDraftContextBar.vue'
 import CodePermissionPicker from './code/CodePermissionPicker.vue'
 import ChatComposer from './chat/ChatComposer.vue'
+import UserQuestionPanel from './chat/UserQuestionPanel.vue'
+import AnsweredQuestionMessage from './chat/AnsweredQuestionMessage.vue'
+import { expandQuestionAnswers, type QuestionAnswerEntry } from './chat/questionAnswerHistory'
 import SessionRunNotice from './chat/SessionRunNotice.vue'
 import AssistantMarkdown from './chat/AssistantMarkdown.vue'
 import MatchedReportList from './chat/MatchedReportList.vue'
@@ -32,6 +36,7 @@ import type { ArtifactItem, EvidenceBundleItem, EvidenceSourceItem } from '../fe
 import { evidenceSourceStats } from '../features/execution-v3/domain/evidenceSourceGroups'
 import { resolvePermission } from '../composables/useChatStream'
 import { useDshToolApprovals } from '../composables/useDshToolApprovals'
+import { useUserQuestions } from '../composables/useUserQuestions'
 import { mergeEvidenceBundles } from '../composables/evidenceBundles'
 import { mergeKnowledgeEvidenceImagesIntoAnswer } from '../api/knowledgeSources'
 import { t, useLocale } from '../composables/i18n'
@@ -54,6 +59,7 @@ import { listSessionParticipants } from '../api/sessionSharing'
 import type { ChatMessageAuthor } from '../api/sessions'
 import { resolveArtifactIcon, resolveArtifactPresentation } from '../registries'
 import { resolveArtifactKind } from '../features/execution-v3/domain/artifactKind'
+import { visibleAnswerArtifacts } from '../features/execution-v3/domain/artifactVisibility'
 import { authenticatedJsonHeaders } from '../api/authHeaders'
 import { agentResourceFamilyAvailable } from '../composables/useEnterpriseAccessPolicy'
 import type { ForeignRun } from '../composables/sessionRunPresence'
@@ -190,6 +196,8 @@ interface Message {
   author?: ChatMessageAuthor | null
   /** Persisted V3 events returned by GET /sessions/{id} for replay. */
   execution_events?: unknown[]
+  question_answers?: QuestionAnswerEntry[]
+  question_answer?: QuestionAnswerEntry
   trigger_source?: string
   scheduled_job_id?: string
   scheduled_run_id?: string
@@ -327,11 +335,14 @@ const displayMessages = computed(() => {
       if (msg._codeChanges && !prev._codeChanges) {
         result[result.length - 1] = { ...prev, _codeChanges: msg._codeChanges }
       }
+      if (msg.question_answers?.length && !prev.question_answers?.length) {
+        result[result.length - 1] = { ...result[result.length - 1], question_answers: msg.question_answers }
+      }
       continue
     }
     result.push(msg)
   }
-  return result
+  return expandQuestionAnswers(result, questionControl.submitted.value)
 })
 
 // Author labels (todo 28): names resolve from the session members list, fetched
@@ -436,6 +447,8 @@ const presentationBlueprintPath = ref('')
 const presentationEditorMsg = ref<Message | null>(null)
 const documentEditorContent = ref('')
 const documentEditorLoading = ref(false)
+const documentEditorStatus = ref<'success' | 'warning' | 'error' | ''>('')
+const editorMessage = useMessage()
 const documentEditorMessageIndex = ref<number | null>(null)
 const {
   activeIntervention,
@@ -794,6 +807,14 @@ const approvalControl = useDshToolApprovals({
 const activeDshApprovals = approvalControl.active
 const approvalBusy = approvalControl.busy
 const approvalErrors = approvalControl.errors
+const questionControl = useUserQuestions({
+  active: () => props.active,
+  conversationId: () => props.sessionId,
+  codeSessionId: () => props.codeSession?.kernel_session_id,
+  token: () => props.authToken,
+  running: () => Boolean(props.running || isLoading.value),
+  assistantMessageId: () => [...messages.value].reverse().find(message => message.role === 'assistant')?.message_id,
+})
 
 function artifactToDocumentInfo(a: ArtifactItem): DocumentInfo {
   return {
@@ -887,10 +908,14 @@ function toRenderableDocumentFormat(type: DocumentInfo['type']): 'pdf' | 'docx' 
 }
 
 function onArtifactOpen(a: ArtifactItem, msg: Message, idx: number) {
-  return openDocumentEditor(artifactToDocumentInfo(a), msg, idx)
+  const doc = artifactToDocumentInfo(a)
+  if (doc.type === 'doc') return downloadDocument(doc)
+  return openDocumentEditor(doc, msg, idx)
 }
 function onArtifactEditPresentation(a: ArtifactItem, msg: Message) {
-  return openPresentationEditor(artifactToDocumentInfo(a), msg)
+  const doc = artifactToDocumentInfo(a)
+  if (doc.type === 'docx') return openDocumentEditor(doc, msg, -1)
+  return openPresentationEditor(doc, msg)
 }
 function onArtifactExportPresentation(a: ArtifactItem, msg: Message) {
   return confirmPresentationPreview(artifactToDocumentInfo(a), msg)
@@ -900,6 +925,16 @@ function onArtifactPreviewHtml(a: ArtifactItem) {
 }
 function onArtifactDownload(a: ArtifactItem) {
   return downloadDocument(artifactToDocumentInfo(a))
+}
+
+function visibleMessageArtifacts(msg: Message): ArtifactItem[] {
+  const state = artifactStore(msg).state
+  return visibleAnswerArtifacts(state.artifacts, state.runStatus)
+}
+
+function downloadMessageArtifact(msg: Message, objectPath: string) {
+  const artifact = visibleMessageArtifacts(msg).find((item) => item.object_path === objectPath)
+  if (artifact) onArtifactDownload(artifact)
 }
 
 
@@ -982,6 +1017,7 @@ async function openDocumentEditor(doc: DocumentInfo, msg: Message, _renderIndex:
   if (msgIndex < 0) return
   activeDocument.value = doc
   documentEditorContent.value = ''
+  documentEditorStatus.value = ''
   const mdDoc = doc.type === 'md'
     ? doc
     : findMarkdownDocument(msg)
@@ -1010,6 +1046,19 @@ async function openDocumentEditor(doc: DocumentInfo, msg: Message, _renderIndex:
     } catch {
       // ignore and fallback to message content
     }
+  }
+  if (!documentEditorContent.value && doc.type === 'docx' && doc.object_path) {
+    try {
+      documentEditorContent.value = await fetchDocxEditSource(props.userId || 'anonymous', doc.object_path)
+    } catch (error) {
+      console.error('Failed to load DOCX edit source:', error)
+      window.alert(t('chat.docx_edit_source_failed'))
+      return
+    }
+  }
+  if (!documentEditorContent.value && doc.type === 'docx') {
+    window.alert(t('chat.docx_edit_source_empty'))
+    return
   }
   if (!documentEditorContent.value) {
     documentEditorContent.value = msg.content || ''
@@ -1202,6 +1251,7 @@ async function regenerateDocument() {
   if (documentEditorMessageIndex.value === null) return
   const content = documentEditorContent.value.trim()
   if (!content) return
+  documentEditorStatus.value = ''
   documentEditorLoading.value = true
   try {
     const previousDocument = { ...activeDocument.value }
@@ -1217,18 +1267,29 @@ async function regenerateDocument() {
       filename: activeDocument.value.filename,
       title: activeDocument.value.title,
     })
-    if (result) {
-      let nextMarkdown: DocumentInfo | null = null
-      if (activeDocument.value.type !== 'md') {
+    if (!result?.object_path) throw new Error('document render returned no file')
+    const nextDocument = {
+      ...activeDocument.value,
+      ...result,
+      id: result.object_path,
+      type: normalizeDocumentType(result.type || activeDocument.value.type),
+      signed_url: result.url || '',
+      url: result.url || '',
+    } as DocumentInfo
+    upsertDocumentEverywhere(msg, previousDocument, nextDocument)
+    activeDocument.value = nextDocument
+    documentEditorStatus.value = 'success'
+    if (nextDocument.type !== 'md') {
+      try {
         const markdownResult = await renderDocument({
           user_id: props.userId || 'anonymous',
           content,
           format: 'md',
-          filename: `${activeDocument.value.title || activeDocument.value.filename || 'document'}.md`,
-          title: activeDocument.value.title,
+          filename: `${nextDocument.title || nextDocument.filename || 'document'}.md`,
+          title: nextDocument.title,
         })
         if (!markdownResult?.object_path) throw new Error('markdown render failed')
-        nextMarkdown = {
+        const nextMarkdown = {
           ...(previousMarkdown || {}),
           ...markdownResult,
           id: markdownResult.object_path || markdownResult.url || previousMarkdown?.id,
@@ -1236,21 +1297,18 @@ async function regenerateDocument() {
           signed_url: markdownResult.url || '',
           url: markdownResult.url || '',
         } as DocumentInfo
-      }
-      const nextDocument = {
-        ...activeDocument.value,
-        ...result,
-        id: result.object_path || result.url || activeDocument.value.id,
-        type: normalizeDocumentType(result.type || activeDocument.value.type),
-        signed_url: result.url || '',
-        url: result.url || '',
-      } as DocumentInfo
-      upsertDocumentEverywhere(msg, previousDocument, nextDocument)
-      activeDocument.value = nextDocument
-      if (nextMarkdown) {
         upsertDocumentEverywhere(msg, previousMarkdown, nextMarkdown)
+      } catch (error) {
+        console.error('Failed to save Markdown edit source:', error)
+        documentEditorStatus.value = 'warning'
+        editorMessage.warning(t('chat.regenerate_source_warning'))
       }
     }
+    if (documentEditorStatus.value === 'success') editorMessage.success(t('chat.regenerate_success'))
+  } catch (error) {
+    console.error('Failed to regenerate document:', error)
+    documentEditorStatus.value = 'error'
+    editorMessage.error(t('chat.regenerate_failed'))
   } finally {
     documentEditorLoading.value = false
   }
@@ -2239,7 +2297,9 @@ function formatErrorMessage(raw: string): string {
                   v-else-if="segment.kind === 'text'"
                   class="assistant-content"
                   :content="segment.content"
+                  :artifact-paths="visibleMessageArtifacts(msg).map((item) => item.object_path || '').filter(Boolean)"
                   :file-references="Boolean(props.codeSession)"
+                  @download-artifact="(path) => downloadMessageArtifact(msg, path)"
                   @open-file="(path) => emit('open-code-file', path)"
                   @image-preview="({ src, alt }) => openImagePreview(src, alt)"
                 />
@@ -2303,7 +2363,8 @@ function formatErrorMessage(raw: string): string {
                   <svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
                   定时任务自动发送
                 </div>
-                <div class="whitespace-pre-wrap leading-7">{{ normalizeUserContent(msg.content) }}</div>
+                <AnsweredQuestionMessage v-if="msg.question_answer" :entry="msg.question_answer" />
+                <div v-else class="whitespace-pre-wrap leading-7">{{ normalizeUserContent(msg.content) }}</div>
                 <div v-if="msg.images?.length" class="mt-3 flex flex-wrap gap-2">
                 <img
                   v-for="(img, imgIdx) in msg.images"
@@ -2376,6 +2437,16 @@ function formatErrorMessage(raw: string): string {
 
     <!-- New composer-area features should be mounted as child components or slot content here. -->
     <div ref="composerContainer" class="shrink-0">
+      <div v-if="questionControl.pending.value.length" class="mx-auto w-full max-w-4xl px-4 md:px-6">
+        <UserQuestionPanel
+          v-for="question in questionControl.pending.value"
+          :key="question.id"
+          :item="question"
+          :busy="questionControl.busy.value"
+          :error="questionControl.error.value"
+          @submit="answers => questionControl.answer(question, answers)"
+        />
+      </div>
       <div v-if="props.foreignRun || props.foreignRunFinished" class="px-4 md:px-6">
         <SessionRunNotice
           :running="Boolean(props.foreignRun)"
@@ -2592,11 +2663,20 @@ function formatErrorMessage(raw: string): string {
           <button class="text-gray-400 hover:text-gray-600 text-lg" @click="closeDocumentEditor">×</button>
         </div>
       </div>
+      <div
+        v-if="documentEditorStatus"
+        role="status"
+        class="mx-6 mt-4 rounded-lg px-4 py-2 text-sm"
+        :class="documentEditorStatus === 'success' ? 'bg-green-50 text-green-800' : documentEditorStatus === 'warning' ? 'bg-amber-50 text-amber-800' : 'bg-red-50 text-red-800'"
+      >
+        {{ t(`chat.regenerate_${documentEditorStatus}`) }}
+      </div>
       <div class="grid grid-cols-2 gap-4 px-6 py-4">
         <div class="flex flex-col">
           <div class="text-xs text-gray-500 mb-2">{{ t('chat.markdown_edit') }}</div>
           <textarea
             v-model="documentEditorContent"
+            @input="documentEditorStatus = ''"
             class="h-[60vh] w-full rounded-2xl border border-gray-200 p-3 text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-blue-200"
           ></textarea>
         </div>

@@ -23,13 +23,13 @@ export function enterpriseToolNames(modelProfile) {
   const skillTools = []
   if (skills.length > 0) skillTools.push('skill')
   if (skills.some(skill => Boolean(skill.bundle_archive_base64 || skill.bundle_archive_id))) skillTools.push(SKILL_RESOURCE_READ_TOOL)
-  if (profile === undefined) return [...new Set([...pluginTools, ...skillTools])].sort()
+  if (profile === undefined) return [...new Set([...pluginTools, ...skillTools, 'ask_user_question'])].sort()
   const replaced = new Set(profile.nativeReplacements ?? [])
   const names = profile.tools
     .map(tool => tool.name)
     .filter(name => typeof name === 'string' && name && !replaced.has(name))
   if (replaced.has('external_search')) names.push('web_search')
-  names.push(...skillTools, ...pluginTools)
+  names.push(...skillTools, ...pluginTools, 'ask_user_question')
   return [...new Set(names)].sort()
 }
 

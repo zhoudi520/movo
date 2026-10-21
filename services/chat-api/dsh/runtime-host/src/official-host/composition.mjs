@@ -35,13 +35,18 @@ export class OfficialDshHostComposition {
     if (this.#ctx !== undefined) throw new Error('official DSH Host composition is already started')
     await this.#boot()
     try {
-      if (await reconcileProfilePlugins(this.#ctx.get('pluginManager'), this.plugins)) {
+      const unavailable = new Map()
+      if (await reconcileProfilePlugins(this.#ctx.get('pluginManager'), this.plugins, {
+        onUnavailable: (plugin, error) => unavailable.set(plugin.name, { name: plugin.name, reason: error.code }),
+      })) {
         await this.dispose()
         await this.#boot()
       }
+      this.unavailablePlugins = [...unavailable.values()]
+      this.availablePlugins = this.plugins.filter(plugin => !unavailable.has(plugin.name))
       const active = new Map((await this.#ctx.get('pluginManager').listBundles())
         .map(item => [item.name, item]))
-      for (const plugin of this.plugins) {
+      for (const plugin of this.availablePlugins) {
         const item = active.get(plugin.name)
         if (!item?.enabled || item.version !== plugin.version || item.error) {
           throw new Error(`DSH plugin ${plugin.name} did not activate in this Runtime Profile`)

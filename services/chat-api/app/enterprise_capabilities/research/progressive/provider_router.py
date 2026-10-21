@@ -12,6 +12,9 @@ from app.llm.types import Message, Role
 from app.enterprise_capabilities.research.progressive.models import SearchCandidate
 from app.infrastructure.request_context import get_request_context
 from app.services.search_provider_config import resolve_default_external_search_provider
+from app.services.search_provider_config import has_saved_external_search_config
+
+from .deepseek_provider import DeepSeekProvider
 
 
 logger = logging.getLogger(__name__)
@@ -252,7 +255,7 @@ class ProviderRouter:
     def __init__(self, providers: list[SearchProvider] | None = None) -> None:
         self._providers = providers
 
-    async def available_providers(self) -> list[SearchProvider]:
+    async def available_providers(self, *, main_id: str | None = None) -> list[SearchProvider]:
         if self._providers is not None:
             logger.info(
                 "progressive_research_providers_injected providers=%s",
@@ -268,7 +271,7 @@ class ProviderRouter:
         settings = get_settings()
         providers: list[SearchProvider] = []
         request_context = get_request_context()
-        main_id = str(request_context.get("main_id") or request_context.get("mainId") or "default").strip() or "default"
+        main_id = str(main_id or request_context.get("main_id") or request_context.get("mainId") or "default").strip() or "default"
         configured: dict[str, Any] | None = None
         try:
             configured = await resolve_default_external_search_provider(main_id)
@@ -276,7 +279,12 @@ class ProviderRouter:
             logger.warning("progressive_research_provider_config_unavailable error=%s", exc)
 
         provider = str((configured or {}).get("provider") or "").strip()
-        if provider == "tavily" and str((configured or {}).get("api_key") or "").strip():
+        if provider == "deepseek" and str((configured or {}).get("api_key") or "").strip():
+            providers.append(DeepSeekProvider(
+                api_key=str(configured.get("api_key") or "").strip(),
+                endpoint=str(configured.get("endpoint") or "").strip(),
+            ))
+        elif provider == "tavily" and str((configured or {}).get("api_key") or "").strip():
             providers.append(TavilyProvider(api_key=str(configured.get("api_key") or "").strip()))
         elif provider == "serper" and str((configured or {}).get("api_key") or "").strip():
             providers.append(SerperProvider(api_key=str(configured.get("api_key") or "").strip()))
@@ -297,6 +305,12 @@ class ProviderRouter:
                     base_url=str(configured.get("base_url") or "").strip(),
                 )
             )
+
+        # Environment keys are legacy fallback for installations without Admin
+        # search settings. A selected provider must never trigger extra billed
+        # searches against other accounts, and disabling it must stay disabled.
+        if configured or await has_saved_external_search_config(main_id):
+            return providers
 
         tavily_key = str(getattr(settings, "TAVILY_API_KEY", "") or "").strip()
         if tavily_key and not any(p.name == "tavily" for p in providers):

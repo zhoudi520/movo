@@ -260,22 +260,20 @@ class KernelEventProjector:
         content = message.get("content")
         blocks = content if isinstance(content, list) else []
 
-        if role == "tool":
-            if isinstance(content, str) and content.strip():
-                texts.append(content)
-            else:
-                for block in blocks:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        texts.append(str(block.get("text") or ""))
+        if role == "tool" and isinstance(content, str) and content.strip():
+            texts.append(content)
             return texts, is_error
 
         for block in blocks:
-            if not isinstance(block, dict) or block.get("type") != "tool-result":
+            if not isinstance(block, dict):
                 continue
-            is_error = is_error or bool(block.get("isError"))
-            for part in list(block.get("content") or []):
-                if isinstance(part, dict) and part.get("type") == "text":
-                    texts.append(str(part.get("text") or ""))
+            if block.get("type") == "text":
+                texts.append(str(block.get("text") or ""))
+            elif block.get("type") == "tool-result":
+                is_error = is_error or bool(block.get("isError"))
+                for part in list(block.get("content") or []):
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        texts.append(str(part.get("text") or ""))
         return texts, is_error
 
     @classmethod

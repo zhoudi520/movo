@@ -25,6 +25,7 @@
     "@deepseek-ai/dsh-session-persistence-jsonl": "0.2.1-alpha.1",
     "@deepseek-ai/dsh-settings": "0.2.1-alpha.1",
     "@deepseek-ai/dsh-system-prompt": "0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-ask-user": "0.2.1-alpha.1",
     "@deepseek-ai/dsh-tool-skill": "0.2.1-alpha.1",
     "@deepseek-ai/dsh-tool-web": "0.2.1-alpha.1",
     "@deepseek-ai/dsh-tools": "0.2.1-alpha.1",

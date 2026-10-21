@@ -25,3 +25,24 @@ test('runtime profile installs from the registry selected during inspection', as
     { enabled: true, registry: 'https://registry.npmjs.org/' },
   ])
 })
+
+test('an incompatible plugin does not block unrelated runtime plugins', async () => {
+  const skipped = []
+  const installed = []
+  const manager = {
+    listBundles: async () => [],
+    installBundle: async spec => {
+      installed.push(spec)
+      return spec.includes('codegraph')
+        ? { application: 'failed', error: { code: 'incompatible-version', incompatible: [{ name: 'codegraph' }] } }
+        : { bundle: 'healthy-plugin', version: '1.0.0', changed: true }
+    },
+  }
+  const restart = await reconcileProfilePlugins(manager, [
+    { name: 'codegraph', version: '0.2.1', spec: 'codegraph@0.2.1' },
+    { name: 'healthy-plugin', version: '1.0.0', spec: 'healthy-plugin@1.0.0' },
+  ], { onUnavailable: (plugin, error) => skipped.push([plugin.name, error.code]) })
+  assert.equal(restart, true)
+  assert.deepEqual(skipped, [['codegraph', 'incompatible-version']])
+  assert.deepEqual(installed, ['codegraph@0.2.1', 'healthy-plugin@1.0.0'])
+})

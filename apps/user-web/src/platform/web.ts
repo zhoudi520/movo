@@ -106,6 +106,8 @@ export async function resizeDshProjectTerminal(_terminalId: string, _cols: numbe
 export async function closeDshProjectTerminal(_terminalId: string) { return { closed: true } }
 export function onDshProjectTerminalEvent(_listener: (event: DshTerminalEvent) => void) { return () => {} }
 export async function decideDshCodeApproval(_sessionId: string, _approvalId: string, _decision: 'approved' | 'rejected', _grantScope: 'once' | 'session'): Promise<{ decided: boolean }> { throw new Error('local Code approvals are only available in the desktop app') }
+export async function listDshCodeQuestions(_sessionId: string): Promise<import('./types').DshPendingQuestion[]> { return [] }
+export async function answerDshCodeQuestion(_sessionId: string, _questionId: string, _answers: import('./types').DshQuestionAnswer[]): Promise<{ answered: boolean }> { throw new Error('local Code questions are only available in the desktop app') }
 
 const EMPTY_BROWSER: EmbeddedBrowserState = {
   session_id: 'default',

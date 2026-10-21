@@ -187,6 +187,15 @@ export class RuntimeHttpServer {
       if (request.method === 'GET' && parts[5] === 'approvals' && parts.length === 6) {
         return sendJson(response, 200, { approvals: runtime.pendingApprovals(sessionId) })
       }
+      if (request.method === 'GET' && parts[5] === 'questions' && parts.length === 6) {
+        return sendJson(response, 200, { questions: runtime.pendingQuestions(sessionId) })
+      }
+      if (request.method === 'POST' && parts[5] === 'questions' && parts[6] !== undefined && parts[7] === 'answer') {
+        const body = await readJson(request)
+        return sendJson(response, 200, runtime.answerQuestion(
+          sessionId, decodeURIComponent(parts[6]), body.answers,
+        ))
+      }
       if (request.method === 'POST' && parts[5] === 'approvals' && parts[6] !== undefined && parts[7] === 'decision') {
         const body = await readJson(request)
         return sendJson(response, 200, runtime.decideApproval(

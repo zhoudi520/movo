@@ -2,10 +2,15 @@
 // Separate artifact card group. Rendered by ChatWindow after the assistant
 // text so deliverables appear below the answer, like Claude Code.
 
+import { computed } from 'vue'
 import type { ArtifactItem } from '../../features/execution-v3/domain/delivery'
+import { visibleAnswerArtifacts } from '../../features/execution-v3/domain/artifactVisibility'
 import ArtifactRow from './ArtifactRow.vue'
 
-defineProps<{ store: { state: { artifacts: ArtifactItem[] } } }>()
+const props = defineProps<{ store: { state: { artifacts: ArtifactItem[]; runStatus: string } } }>()
+const visibleArtifacts = computed(() => visibleAnswerArtifacts(
+  props.store.state.artifacts, props.store.state.runStatus,
+))
 const emit = defineEmits<{
   (e: 'open',     a: ArtifactItem): void
   (e: 'edit',     a: ArtifactItem): void
@@ -17,9 +22,9 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div v-if="store.state.artifacts.length" class="space-y-2">
+  <div v-if="visibleArtifacts.length" class="space-y-2">
     <ArtifactRow
-      v-for="a in store.state.artifacts"
+      v-for="a in visibleArtifacts"
       :key="a.id"
       :artifact="a"
       @open="emit('open', $event)"

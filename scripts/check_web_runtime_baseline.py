@@ -17,6 +17,9 @@ WEB_DOCKERFILES = (
 )
 SUPPORTED_RUNTIME_SUFFIX = "-trixie"
 FROM_PATTERN = re.compile(r"^\s*FROM\s+([^\s]+)", re.IGNORECASE | re.MULTILINE)
+HEALTH_TOOLS_PATTERN = re.compile(
+    r"apt-get\s+install\s+-y\s+--no-install-recommends\s+curl\s+wget\b"
+)
 
 
 def final_base_image(contents: str, dockerfile: Path) -> str:
@@ -54,6 +57,13 @@ def validate_web_runtime_baseline(
             "web runtime must use the pinned official Debian/glibc nginx baseline "
             f"(*{SUPPORTED_RUNTIME_SUFFIX}); found {runtime}"
         )
+    for dockerfile in resolved:
+        contents = (repository_root / dockerfile).read_text(encoding="utf-8")
+        if not HEALTH_TOOLS_PATTERN.search(contents):
+            errors.append(
+                f"{dockerfile}: web runtime must include curl and wget for "
+                "current and legacy Compose health checks"
+            )
     return errors
 
 

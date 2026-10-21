@@ -75,6 +75,7 @@ class MessageIn(BaseModel):
     evidence_bundles: Optional[list] = Field(None, validation_alias=AliasChoices("evidence_bundles", "evidenceBundles"), description="Optional persisted evidence bundles")
     message_id: Optional[str] = Field(None, description="Streaming message id from chat completion (X-Message-Id)")
     execution_events: Optional[list] = Field(None, description="Replayed V3 execution events on session GET (read-only)")
+    question_answers: Optional[list] = Field(None, description="Answered human questions within this assistant turn")
     trigger_source: Optional[str] = None
     scheduled_job_id: Optional[str] = None
     scheduled_run_id: Optional[str] = None
@@ -1135,6 +1136,7 @@ async def get_session(
                 evidence_bundles=msg.get("evidence_bundles"),
                 message_id=msg_id_val or None,
                 execution_events=events_for_msg or None,
+                question_answers=msg.get("question_answers") or None,
                 trigger_source=msg.get("trigger_source"),
                 scheduled_job_id=msg.get("scheduled_job_id"),
                 scheduled_run_id=msg.get("scheduled_run_id"),

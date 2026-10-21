@@ -6,4 +6,5 @@ ARG MOVO_SECURITY_REFRESH=local
 RUN test -n "${MOVO_SECURITY_REFRESH}" \
     && apt-get update \
     && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends curl wget \
     && rm -rf /var/lib/apt/lists/*

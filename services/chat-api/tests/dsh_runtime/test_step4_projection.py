@@ -221,6 +221,36 @@ def test_failed_tool_result_projects_as_failed_item() -> None:
     assert failed["payload"]["error"] == "schema mismatch"
 
 
+def test_native_text_tool_result_projects_generated_document() -> None:
+    projector = KernelEventProjector()
+    projector.project(
+        _event("tool.call.started", {"callId": "call-export", "name": "artifact_export"}, cursor=22),
+        message_id="message-a",
+    )
+    completed = projector.project(
+        _event("tool.call.completed", {"message": {
+            "source": {"callId": "call-export"}, "isError": False,
+            "content": [{"type": "text", "text": '{"success":true,"artifact":{"object_path":"user-a/report.docx","filename":"report.docx"}}'}],
+        }}, cursor=23),
+        message_id="message-a",
+    )
+    assert completed is not None
+    assert completed["payload"]["artifacts"] == [{"object_path": "user-a/report.docx", "filename": "report.docx"}]
+
+
+def test_native_text_tool_error_projects_failed_item() -> None:
+    projected = KernelEventProjector().project(
+        _event("tool.call.completed", {"message": {
+            "source": {"callId": "call-export"}, "isError": True,
+            "content": [{"type": "text", "text": "Error: export failed"}],
+        }}, cursor=24),
+        message_id="message-a",
+    )
+    assert projected is not None
+    assert projected["type"] == "item.failed"
+    assert projected["payload"]["error"] == "Error: export failed"
+
+
 def test_native_code_dispatch_projects_inner_dsh_tools_without_askai_code_tools() -> None:
     mapper = DshEventMapper(kernel_version="0.1.0-rc.6")
     projector = KernelEventProjector()

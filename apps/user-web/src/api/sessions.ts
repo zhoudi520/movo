@@ -1,4 +1,5 @@
 import axios from 'axios'
+import type { QuestionAnswerEntry } from '../components/chat/questionAnswerHistory'
 
 export type ChatMessageAuthor = {
   user_id: string
@@ -29,6 +30,7 @@ export type ChatMessage = {
   author?: ChatMessageAuthor | null
   /** Persisted V3 events returned by GET /sessions/{id}; used for replay. */
   execution_events?: any[]
+  question_answers?: QuestionAnswerEntry[]
   trigger_source?: string
   scheduled_job_id?: string
   scheduled_run_id?: string

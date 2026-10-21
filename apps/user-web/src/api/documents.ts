@@ -45,6 +45,14 @@ export async function fetchBlueprintJson(userId: string, objectPath: string): Pr
   return typeof response.data === 'string' ? JSON.parse(response.data) : response.data
 }
 
+export async function fetchDocxEditSource(userId: string, objectPath: string): Promise<string> {
+  const response = await client.post('/askai-api/api/documents/edit-source', {
+    user_id: userId,
+    object_path: objectPath,
+  })
+  return String(response.data || '')
+}
+
 export async function saveBlueprint(payload: {
   user_id: string
   blueprint_object_path: string

@@ -9,6 +9,8 @@ export interface ArtifactItem {
   title?: string
   content_type?: string
   size?: number
+  lifecycle?: string
+  visibility?: string
   bundle?: Record<string, any>
 }
 

@@ -218,7 +218,7 @@
               </div>
               <n-space>
                 <n-switch v-model:value="form.enabled" />
-                <n-button secondary :disabled="activeProvider.isDefault" @click="makeDefault">
+                <n-button secondary :disabled="!form.enabled || activeProvider.isDefault || saving" @click="makeDefault">
                   {{ activeProvider.isDefault ? t('当前默认') : t('设为默认') }}
                 </n-button>
               </n-space>
@@ -243,7 +243,7 @@
                   </n-form-item>
                 </n-grid-item>
 
-                <n-grid-item v-if="selectedProvider === 'baidu_qianfan'" :span="2">
+                <n-grid-item v-if="selectedProvider === 'baidu_qianfan' || selectedProvider === 'deepseek'" :span="2">
                   <n-form-item label="Endpoint">
                     <n-input v-model:value="form.endpoint">
                       <template #prefix>
@@ -907,11 +907,11 @@ function saveGeneralSettings() {
 }
 
 const providers = ref<ExternalSearchProviderItem[]>([]);
-const selectedProvider = ref<ExternalSearchProvider>('tavily');
+const selectedProvider = ref<ExternalSearchProvider>('deepseek');
 const loading = ref(false);
 const saving = ref(false);
 const testing = ref(false);
-const testQuery = ref('OpenAI latest news');
+const testQuery = ref('DeepSeek latest news');
 const testResult = ref<ExternalSearchTestResult | null>(null);
 const pageCollectionSettings = ref<PageCollectionSettings | null>(null);
 const pageCollectionLoading = ref(false);
@@ -1145,10 +1145,9 @@ async function loadKnowledgeParseSettings() {
 async function saveCurrent() {
   saving.value = true;
   try {
-    const saved = await saveExternalSearchProvider(selectedProvider.value, { ...form });
-    const index = providers.value.findIndex((item) => item.provider === saved.provider);
-    if (index >= 0) providers.value[index] = saved;
-    fillForm(saved);
+    const provider = selectedProvider.value;
+    await saveExternalSearchProvider(provider, { ...form });
+    await loadProviders();
     message.success(t('配置已保存'));
   } finally {
     saving.value = false;
@@ -1156,6 +1155,7 @@ async function saveCurrent() {
 }
 
 async function makeDefault() {
+  if (!form.enabled) return;
   await saveCurrent();
   await setDefaultExternalSearchProvider(selectedProvider.value);
   message.success(t('默认搜索源已更新'));

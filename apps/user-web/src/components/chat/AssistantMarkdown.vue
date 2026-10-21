@@ -3,21 +3,28 @@ import { computed } from 'vue'
 import { renderAssistantMarkdown } from '../../utils/assistantMarkdown'
 import { copyTextToClipboard } from '../../utils/copyTextToClipboard'
 
-const props = withDefaults(defineProps<{ content: string; compact?: boolean; fileReferences?: boolean }>(), {
+const props = withDefaults(defineProps<{ content: string; compact?: boolean; fileReferences?: boolean; artifactPaths?: string[] }>(), {
   compact: true,
   fileReferences: false,
 })
 const emit = defineEmits<{
   (event: 'open-file', path: string): void
+  (event: 'download-artifact', path: string): void
   (event: 'image-preview', payload: { src: string; alt: string }): void
 }>()
 
-const html = computed(() => renderAssistantMarkdown(props.content, { workspaceFileReferences: props.fileReferences }))
+const html = computed(() => renderAssistantMarkdown(props.content, { workspaceFileReferences: props.fileReferences, artifactPaths: props.artifactPaths }))
 
 function fileReference(target: EventTarget | null): HTMLElement | null {
   return target instanceof Element ? target.closest<HTMLElement>('[data-workspace-file]') : null
 }
 async function handleClick(event: Event) {
+  const artifact = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-artifact-path]') : null
+  if (artifact?.dataset.artifactPath) {
+    event.preventDefault()
+    emit('download-artifact', artifact.dataset.artifactPath)
+    return
+  }
   if (event.target instanceof HTMLImageElement) {
     event.preventDefault()
     emit('image-preview', { src: event.target.currentSrc || event.target.src, alt: event.target.alt })

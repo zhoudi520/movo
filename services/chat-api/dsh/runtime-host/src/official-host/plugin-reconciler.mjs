@@ -3,7 +3,7 @@ import { pluginInstallError } from './plugin-install-error.mjs'
 // A Runtime Profile is immutable. Install its declared bundle versions into
 // its private DSH profile before admitting Sessions, then restart once so a
 // startup-only composition can mount the new bundle layer.
-export async function reconcileProfilePlugins(manager, desired) {
+export async function reconcileProfilePlugins(manager, desired, { onUnavailable } = {}) {
   if (!desired?.length) return false
   const installed = new Map((await manager.listBundles()).map(item => [item.name, item]))
   // DSH installs every bundle into one profile. A later pnpm install resolves
@@ -22,6 +22,10 @@ export async function reconcileProfilePlugins(manager, desired) {
         enabled: true,
         ...(profileRegistry ? { registry: profileRegistry } : {}),
       })
+    if (result.error?.code === 'incompatible-version' && onUnavailable) {
+      onUnavailable(plugin, result.error)
+      continue
+    }
     if (result.application === 'failed' || result.error) {
       throw pluginInstallError(plugin, result)
     }

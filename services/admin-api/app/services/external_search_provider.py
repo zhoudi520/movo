@@ -16,6 +16,14 @@ from app.core.config import settings
 
 
 PROVIDERS: dict[str, dict[str, Any]] = {
+    "deepseek": {
+        "label": "DeepSeek Search",
+        "description": "使用 DeepSeek Search API 检索网页，按成功请求次数计费。",
+        "endpoint": "https://api.deepseek.com/v1/tools/search",
+        "base_url": "",
+        "model": "",
+        "priority": 5,
+    },
     "tavily": {
         "label": "Tavily",
         "description": "面向 AI 应用的网页搜索，配置最简单。",
@@ -178,6 +186,13 @@ async def test_provider(provider: str, config: dict[str, str], query: str) -> li
     search_query = str(query or "").strip() or "MOVO enterprise AI"
 
     def run() -> list[dict[str, str]]:
+        if token == "deepseek":
+            data = _post_json(
+                config["endpoint"],
+                {"Content-Type": "application/json", "Authorization": f"Bearer {config['api_key']}"},
+                {"query": search_query, "count": 3, "need_content": False},
+            )
+            return _reference_rows(data.get("results"))
         if token == "tavily":
             data = _post_json(
                 "https://api.tavily.com/search",

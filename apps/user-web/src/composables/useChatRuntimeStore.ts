@@ -83,6 +83,7 @@ export type RuntimeMessage = {
   /** T5: authoritative user-message author projection; T9 renders this. */
   author?: ChatMessageAuthor | null
   execution_events?: any[]
+  question_answers?: import('../components/chat/questionAnswerHistory').QuestionAnswerEntry[]
   documents?: RuntimeDocumentInfo[]
   images?: RuntimeImageInfo[]
   evidence_bundles?: any[]

@@ -6,7 +6,7 @@ import hashlib
 import json
 import logging
 import re
-from typing import Any, Literal, Protocol
+from typing import Any, Awaitable, Callable, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -77,10 +77,17 @@ class MongoToolCatalog:
 
 
 class ToolProfileCompiler:
-    def __init__(self, catalog: ToolCatalog, internal_catalog: InternalCapabilityCatalog | None = None, policy_resolver: EmployeePolicyResolver | None = None) -> None:
+    def __init__(
+        self,
+        catalog: ToolCatalog,
+        internal_catalog: InternalCapabilityCatalog | None = None,
+        policy_resolver: EmployeePolicyResolver | None = None,
+        search_availability: Callable[[str], Awaitable[bool]] | None = None,
+    ) -> None:
         self._catalog = catalog
         self._internal_catalog = internal_catalog
         self._policy_resolver = policy_resolver
+        self._search_availability = search_availability
 
     async def compile(self, *, tenant_id: str, user_id: str) -> tuple[ToolProfileDefinition, ...]:
         rows = await self._catalog.list_enabled(tenant_id, user_id)
@@ -99,7 +106,12 @@ class ToolProfileCompiler:
             else:
                 definitions.append(self._compile_http(row))
         if self._internal_catalog is not None:
+            public_search_available = (
+                await self._search_availability(tenant_id) if self._search_availability else True
+            )
             for capability in await self._internal_catalog.list_enabled(tenant_id, user_id):
+                if not public_search_available and capability.tool_name in {"external_search", "progressive_research"}:
+                    continue
                 if policy is not None and not policy.allows_internal(capability.capability_ref):
                     continue
                 definitions.append(ToolProfileDefinition(
