@@ -14,6 +14,7 @@ from app.enterprise_capabilities.artifacts.references import (
 from app.services.document_context import document_context_service
 from app.services.document_parse_error_presenter import user_facing_parse_error
 from app.services.document_parser import document_parser_service
+from app.services.knowledge_file_parse_settings import get_effective_file_parse_settings, mineru_runtime_payload
 from app.services.image_assets import build_embedded_document_image_assets, build_uploaded_image_assets
 from app.services.vision import vision_service
 
@@ -479,6 +480,7 @@ class RuntimeParseService:
             "filename": filename,
             "source_url": local_path,
             "parser": parser,
+            "parse_route": f"local_runtime_{parser}",
         }
 
     async def parse_documents(
@@ -506,6 +508,16 @@ class RuntimeParseService:
         parsed_documents: List[Dict[str, Any]] = []
         active_contexts: List[str] = []
         user_id = str(output_spec.get("user_id") or output_spec.get("userId") or "").strip()
+        tenant_id = str(output_spec.get("tenant_id") or output_spec.get("main_id") or "").strip()
+        mineru_config = None
+        if tenant_id:
+            file_parse = await get_effective_file_parse_settings(tenant_id, include_secrets=True)
+            mineru_config = mineru_runtime_payload(file_parse)
+        logger.info(
+            f"runtime_parse_documents_policy tenant_id={tenant_id or 'unknown'} "
+            f"mineru_configured={bool(mineru_config)} source_count={len(sources)} "
+            f"sync_remote_backend={'mineru' if mineru_config else 'docling'}"
+        )
 
         for idx, item in enumerate(sources[:8], start=1):
             local_path = str(item.get("local_path") or "").strip()
@@ -515,6 +527,10 @@ class RuntimeParseService:
                 and user_id
                 and is_allowed_local_storage_path(local_path, user_id=user_id)
             ):
+                logger.info(
+                    f"runtime_parse_document_start filename={str(item.get('filename') or '')[:120]} "
+                    f"parse_route=local_runtime index={idx}"
+                )
                 parsed = await self._parse_local_document(item=item, user_id=user_id)
             else:
                 if local_path:
@@ -526,9 +542,24 @@ class RuntimeParseService:
                         bool(str(item.get("object_path") or "").strip()),
                         bool(str(item.get("url") or item.get("signed_url") or "").strip()),
                     )
-                parsed = await document_parser_service.parse_document(document=item, enable_ocr=False)
+                logger.info(
+                    f"runtime_parse_document_start filename={str(item.get('filename') or '')[:120]} "
+                    f"parse_route=remote_service index={idx} "
+                    f"sync_remote_backend={'mineru' if mineru_config else 'docling'}"
+                )
+                parsed = await document_parser_service.parse_document(
+                    document=item,
+                    enable_ocr=False,
+                    mineru_config=mineru_config,
+                )
 
             filename = str(parsed.get("filename") or item.get("filename") or f"document_{idx}").strip()
+            logger.info(
+                f"runtime_parse_document_finished filename={filename[:120]} "
+                f"ok={bool(parsed.get('ok'))} parser={str(parsed.get('parser') or '').strip() or 'unknown'} "
+                f"parse_route={str(parsed.get('parse_route') or '').strip() or 'unknown'} "
+                f"error={str(parsed.get('error') or '')[:160]}"
+            )
             resolved_object_path = document_parser_service.resolve_document_object_path(item)
             if not parsed.get("ok"):
                 raw_error = str(parsed.get("error") or "").strip()
@@ -594,12 +625,11 @@ class RuntimeParseService:
         successful = [item for item in parsed_documents if str(item.get("parse_status") or "") == "parsed"]
         failed = [item for item in parsed_documents if str(item.get("parse_status") or "") != "parsed"]
         logger.info(
-            "runtime_parse_documents_finished node_id=%s parsed=%s failed=%s markdown_chars=%s errors=%s",
-            str(getattr(node, "node_id", "") or ""),
-            len(successful),
-            len(failed),
-            [int(item.get("markdown_chars") or len(str(item.get("markdown") or ""))) for item in successful[:6]],
-            [str(item.get("parse_error") or "")[:160] for item in failed[:6]],
+            f"runtime_parse_documents_finished node_id={str(getattr(node, 'node_id', '') or '')} "
+            f"parsed={len(successful)} failed={len(failed)} "
+            f"parsers={[str(item.get('parser') or '') for item in parsed_documents[:8]]} "
+            f"markdown_chars={[int(item.get('markdown_chars') or len(str(item.get('markdown') or ''))) for item in successful[:6]]} "
+            f"errors={[str(item.get('parse_error') or '')[:160] for item in failed[:6]]}"
         )
         if successful:
             active_document_context = "\n".join(active_contexts[:3]).strip()

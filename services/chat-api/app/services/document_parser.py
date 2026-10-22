@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import logging
+import time
 import tempfile
 import mimetypes
 import re
@@ -1165,6 +1166,7 @@ class DocumentParserService:
         document: Dict[str, Any],
         enable_ocr: bool = False,
         timeout_seconds: float = 90.0,
+        mineru_config: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         source_urls = self._resolve_document_urls(document)
         source_url = source_urls[0] if source_urls else ""
@@ -1213,9 +1215,31 @@ class DocumentParserService:
             return last
 
         if ext == "pdf":
-            remote = await document_processing_parse_client.parse_markdown(document, timeout_seconds=timeout_seconds)
+            sync_backend = "mineru" if mineru_config else "docling"
+            logger.info(
+                f"document_parse_pdf_remote_attempt filename={filename[:120]} "
+                f"sync_backend={sync_backend} timeout_s={timeout_seconds}"
+            )
+            remote_started = time.monotonic()
+            remote = await document_processing_parse_client.parse_markdown(
+                document,
+                timeout_seconds=timeout_seconds,
+                mineru_config=mineru_config,
+            )
+            logger.info(
+                f"document_parse_pdf_remote_result filename={filename[:120]} "
+                f"ok={bool(remote.get('ok'))} parser={str(remote.get('parser') or '')} "
+                f"sync_backend={sync_backend} duration_s={time.monotonic() - remote_started:.1f} "
+                f"error={str(remote.get('error') or '')[:160]}"
+            )
             if remote.get("ok"):
+                if not remote.get("parse_route"):
+                    remote["parse_route"] = f"pdf_remote_{sync_backend}"
                 return remote
+            logger.info(
+                f"document_parse_pdf_fallback_local filename={filename[:120]} "
+                f"reason={str(remote.get('error') or 'remote_failed')[:160]}"
+            )
 
         if ext in {"md", "markdown", "txt"}:
             try:
@@ -1245,6 +1269,13 @@ class DocumentParserService:
         if ext in {"pdf", "xlsx", "xlsm", "csv", "tsv", "xls"}:
             local = await _try_local_parse_candidates()
             if local.get("ok") or not self._endpoint:
+                if local.get("ok") and not local.get("parse_route"):
+                    local["parse_route"] = f"local_{str(local.get('parser') or 'unknown')}"
+                if local.get("ok"):
+                    logger.info(
+                        f"document_parse_local_success filename={filename[:120]} "
+                        f"parser={str(local.get('parser') or '')} parse_route={local.get('parse_route')}"
+                    )
                 return local
 
         if ext == "docx":

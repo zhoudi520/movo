@@ -142,6 +142,10 @@ class Settings(BaseSettings):
     DOCUMENT_PROCESSING_SERVICE_TOKEN: str = ""
     DOCUMENT_PROCESSING_TIMEOUT_SECONDS: float = 30.0
     DOCUMENT_PROCESSING_SYNC_PARSE_TIMEOUT_SECONDS: float = 180.0
+    MINERU_SERVICE_URL: str = ""
+    MINERU_API_KEY: str = ""
+    MINERU_MODEL_VERSION: str = "vlm"
+    MINERU_LANGUAGE: str = "ch"
     KNOWLEDGE_STORAGE_TYPE: str = "local"
     KNOWLEDGE_LOCAL_STORAGE_DIR: str = "../admin-api/data/knowledge-documents"
     KNOWLEDGE_OSS_BUCKET: str = ""

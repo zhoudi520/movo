@@ -65,6 +65,9 @@ class MineruParseJobRequest(BaseModel):
 class ParseMarkdownRequest(BaseModel):
     source: StorageRef
     sourceUrl: str = ""
+    mineru: MineruCredentials | None = None
+    modelVersion: str = "vlm"
+    language: str = "ch"
     minChunkSize: int = Field(default=800, ge=50, le=4000)
     chunkSize: int = Field(default=1500, ge=200, le=8000)
     chunkOverlap: int = Field(default=80, ge=0, le=2000)

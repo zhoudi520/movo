@@ -166,7 +166,11 @@ async def knowledge_read_document(arguments: dict[str, Any], context: Capability
 
 async def document_parse(arguments: dict[str, Any], context: CapabilityExecutionContext) -> dict[str, Any]:
     safe_arguments = {**arguments, "artifacts": parser_artifacts(list(arguments.get("artifacts") or []), user_id=context.user_id)}
-    output_spec = _artifact_output_spec(safe_arguments, "artifacts")
+    output_spec = {
+        **_artifact_output_spec(safe_arguments, "artifacts"),
+        "user_id": context.user_id,
+        "tenant_id": context.tenant_id,
+    }
     result = await runtime_parse_service.parse_documents(
         node=_node(arguments, "document.parse"), output_spec=output_spec, user_text=str(arguments.get("purpose") or ""),
     )

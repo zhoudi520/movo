@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict
 
 import httpx
@@ -40,7 +41,13 @@ class DocumentProcessingParseClient:
                 return ""
         return ""
 
-    async def parse_markdown(self, document: Dict[str, Any], *, timeout_seconds: float | None = None) -> Dict[str, Any]:
+    async def parse_markdown(
+        self,
+        document: Dict[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+        mineru_config: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
         base_url = str(getattr(self._settings, "DOCUMENT_PROCESSING_BASE_URL", "") or "").strip().rstrip("/")
         token = str(getattr(self._settings, "DOCUMENT_PROCESSING_SERVICE_TOKEN", "") or "").strip()
         source = self._source_from_document(document)
@@ -51,8 +58,21 @@ class DocumentProcessingParseClient:
         source_url = self._source_url_from_document(document, source)
         if source_url:
             payload["sourceUrl"] = source_url
+        if mineru_config:
+            service_url = str(mineru_config.get("serviceUrl") or "").strip()
+            api_key = str(mineru_config.get("apiKey") or "").strip()
+            if service_url and api_key:
+                payload["mineru"] = {"serviceUrl": service_url, "apiKey": api_key}
+                payload["modelVersion"] = str(mineru_config.get("modelVersion") or "vlm").strip() or "vlm"
+                payload["language"] = str(mineru_config.get("language") or "ch").strip() or "ch"
         configured_timeout = float(getattr(self._settings, "DOCUMENT_PROCESSING_SYNC_PARSE_TIMEOUT_SECONDS", 180.0) or 180.0)
         timeout = max(float(timeout_seconds or 0.0), configured_timeout)
+        sync_backend = "mineru" if payload.get("mineru") else "docling"
+        logger.info(
+            f"document_processing_parse_markdown_start filename={filename[:120]} "
+            f"sync_backend={sync_backend} timeout_s={timeout:.1f} base_url={base_url}"
+        )
+        started_at = time.monotonic()
         try:
             async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
                 resp = await client.post(
@@ -65,10 +85,9 @@ class DocumentProcessingParseClient:
                 )
             if resp.status_code >= 400:
                 logger.info(
-                    "document_processing_parse_failed filename=%s status=%s body=%s",
-                    filename[:120],
-                    resp.status_code,
-                    str(resp.text or "")[:300],
+                    f"document_processing_parse_markdown_failed filename={filename[:120]} "
+                    f"sync_backend={sync_backend} status={resp.status_code} "
+                    f"duration_s={time.monotonic() - started_at:.1f} body={str(resp.text or '')[:300]}"
                 )
                 return {
                     "ok": False,
@@ -79,7 +98,11 @@ class DocumentProcessingParseClient:
                 }
             data = resp.json() if str(resp.text or "").strip() else {}
         except Exception as exc:
-            logger.info("document_processing_parse_unavailable filename=%s error=%s", filename[:120], str(exc)[:300])
+            logger.info(
+                f"document_processing_parse_markdown_unavailable filename={filename[:120]} "
+                f"sync_backend={sync_backend} duration_s={time.monotonic() - started_at:.1f} "
+                f"error={str(exc)[:300]}"
+            )
             return {
                 "ok": False,
                 "error": f"document_processing_unavailable: {exc}",
@@ -89,6 +112,12 @@ class DocumentProcessingParseClient:
             }
 
         markdown = str((data or {}).get("markdown") or "").strip()
+        resolved_parser = str((data or {}).get("parser") or "document_processing").strip() or "document_processing"
+        logger.info(
+            f"document_processing_parse_markdown_finished filename={filename[:120]} "
+            f"ok={bool(markdown)} parser={resolved_parser} sync_backend={sync_backend} "
+            f"duration_s={time.monotonic() - started_at:.1f} markdown_chars={len(markdown)}"
+        )
         return {
             "ok": bool(markdown),
             "error": "" if markdown else "document_processing_missing_markdown",
@@ -104,7 +133,8 @@ class DocumentProcessingParseClient:
             "rag_chunks": list((data or {}).get("ragChunks") or []),
             "source_url": f"object://{source.get('storageKey')}",
             "filename": filename,
-            "parser": str((data or {}).get("parser") or "document_processing").strip() or "document_processing",
+            "parser": resolved_parser,
+            "parse_route": f"document_processing_sync_{sync_backend}",
         }
 
 
